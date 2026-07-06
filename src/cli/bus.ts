@@ -20,6 +20,7 @@ import { listVendorDocPatterns, vendorDocPattern } from '../bus/vendor-patterns.
 import { createReminder, listReminders, ackReminder, pruneReminders } from '../bus/reminders.js';
 import { sendSms } from '../bus/send-sms.js';
 import { sendViaRelay } from '../bus/send-via-relay.js';
+import { gmailSend, gmailAuth, gmailTokenStatus } from '../bus/gmail.js';
 import { updateCronFire, parseDurationMs, readCronState } from '../bus/cron-state.js';
 import { addCron, removeCron, readCrons, updateCron as updateCronDef, getCronByName, getExecutionLog } from '../bus/crons.js';
 import { nextFireFromCron } from '../daemon/cron-scheduler.js';
@@ -3680,4 +3681,92 @@ busCommand
       process.exit(1);
     }
     console.log(JSON.stringify({ ok: true, status: result.status, body: result.body }));
+  });
+
+busCommand
+  .command('send-email')
+  .description('Send an email via Gmail (requires prior gmail-auth for this agent)')
+  .requiredOption('--to <address>', 'Recipient email address')
+  .requiredOption('--subject <subject>', 'Email subject line')
+  .requiredOption('--body <body>', 'Email body (plain text)')
+  .option('--cc <address>', 'CC recipient(s), comma-separated')
+  .option('--from <address>', 'Sender display name and address (e.g. "Name <email>")')
+  .option('--agent <name>', 'Agent whose stored token to use (defaults to CTX_AGENT_NAME)')
+  .option('--org <name>', 'Org to load credentials from (defaults to CTX_ORG)')
+  .action(async (opts: { to: string; subject: string; body: string; cc?: string; from?: string; agent?: string; org?: string }) => {
+    const env = resolveEnv();
+    const agent = opts.agent || env.agentName;
+    const org = opts.org || env.org;
+    if (!org) {
+      console.error('ERROR: --org or CTX_ORG required');
+      process.exit(1);
+    }
+    if (!env.frameworkRoot) {
+      console.error('ERROR: CTX_FRAMEWORK_ROOT must be set to locate orgs/<org>/secrets.env');
+      process.exit(1);
+    }
+    try {
+      const result = await gmailSend(env.frameworkRoot, org, agent, {
+        to: opts.to,
+        subject: opts.subject,
+        body: opts.body,
+        cc: opts.cc,
+        from: opts.from,
+      });
+      console.log(JSON.stringify({ ok: true, messageId: result.messageId, threadId: result.threadId }));
+    } catch (err) {
+      console.error(`ERROR: ${(err as Error).message}`);
+      process.exit(1);
+    }
+  });
+
+busCommand
+  .command('gmail-auth')
+  .description('Authorize Gmail access for an agent (one-time OAuth2 flow via browser)')
+  .option('--account <email>', 'Gmail account to authorize (used as display hint and stored in token)')
+  .option('--agent <name>', 'Agent to store the token for (defaults to CTX_AGENT_NAME)')
+  .option('--org <name>', 'Org to load OAuth credentials from (defaults to CTX_ORG)')
+  .action(async (opts: { account?: string; agent?: string; org?: string }) => {
+    const env = resolveEnv();
+    const agent = opts.agent || env.agentName;
+    const org = opts.org || env.org;
+    if (!org) {
+      console.error('ERROR: --org or CTX_ORG required');
+      process.exit(1);
+    }
+    if (!env.frameworkRoot) {
+      console.error('ERROR: CTX_FRAMEWORK_ROOT must be set to locate orgs/<org>/secrets.env');
+      process.exit(1);
+    }
+    try {
+      const result = await gmailAuth(env.frameworkRoot, org, agent, opts.account);
+      console.log(`\nAuthorization complete. Token saved for agent "${result.agent}".`);
+      if (result.email) console.log(`Authorized account: ${result.email}`);
+    } catch (err) {
+      console.error(`ERROR: ${(err as Error).message}`);
+      process.exit(1);
+    }
+  });
+
+busCommand
+  .command('gmail-status')
+  .description('Show the Gmail token status for an agent')
+  .option('--agent <name>', 'Agent to check (defaults to CTX_AGENT_NAME)')
+  .action((opts: { agent?: string }) => {
+    const env = resolveEnv();
+    const agent = opts.agent || env.agentName;
+    const status = gmailTokenStatus(agent);
+    if (!status.stored) {
+      console.log(JSON.stringify({ stored: false, agent, message: `No Gmail token found. Run: cortextos bus gmail-auth --agent ${agent}` }));
+    } else {
+      const expiryStr = status.expiry_time ? new Date(status.expiry_time).toISOString() : 'unknown';
+      console.log(JSON.stringify({
+        stored: true,
+        agent,
+        email: status.email,
+        expired: status.expired,
+        expiry_time: expiryStr,
+        message: status.expired ? 'Token expired — will auto-refresh on next send-email call' : 'Token valid',
+      }));
+    }
   });
