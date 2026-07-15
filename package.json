@@ -8,6 +8,7 @@
     "ascendops": "dist/ascendops.js"
   },
   "scripts": {
+    "prebuild": "npm run typecheck",
     "build": "tsup",
     "dev": "tsup --watch",
     "test": "vitest run",

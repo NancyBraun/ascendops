@@ -70,6 +70,17 @@ export const PII_PATTERNS: PiiPattern[] = [
     regex: /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/,
     severity: 'high',
   },
+  {
+    // Formatted SSN (XXX-XX-XXXX / XXX XX XXXX / XXX.XX.XXXX). The \b
+    // boundaries keep a 10-digit phone (XXX-XXX-XXXX) from matching the
+    // XXX-XX-XXXX shape. Separator class `[-.\t ]` (horizontal only, no
+    // newline) matches the redactor in src/utils/ssn-redaction.ts; this entry
+    // only lets the community-catalog pre-submission scan flag SSNs in staged
+    // contributions. Detection-only — do not treat this as the scrub source.
+    name: 'ssn',
+    regex: /\b\d{3}[-.\t ]\d{2}[-.\t ]\d{4}\b/,
+    severity: 'high',
+  },
 ];
 
 /**

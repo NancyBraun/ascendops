@@ -2,7 +2,7 @@
 # init-agent-worktree.sh
 # Idempotent: create the per-agent git worktree if it doesn't exist yet.
 # Part of worktree-isolation pattern
-# (orgs/ascendops/docs/durable/worktree-isolation-design-2026-05-23.md).
+# (your org internal docs).
 #
 # Usage:
 #   init-agent-worktree.sh [<agent>]
@@ -41,7 +41,7 @@ fi
 # branch based on origin/main. We CANNOT reuse 'main' directly because git
 # worktree add refuses to reuse a branch that's already checked out elsewhere
 # (the canonical CTX_FRAMEWORK_ROOT is typically on main — see design §4.2
-# where Dane stays on canonical). Instead each agent gets its own base branch
+# where an agent stays on canonical). Instead each agent gets its own base branch
 # 'agent/{agent}-base' tracking origin/main, which the refresh script keeps
 # in sync. (Codex bot P1 catch on PR #53, 2026-05-23.)
 mkdir -p "$(dirname "$WORKTREE")"

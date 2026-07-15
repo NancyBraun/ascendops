@@ -8,17 +8,20 @@ import { SlackSocketListener } from './slack-socket-listener.js';
 import { resolveSlackInboundMode } from './slack-inbound-mode.js';
 import { CronScheduler } from './cron-scheduler.js';
 import { syncCronsForAgent } from './cron-migration.js';
+import { appendExecutionLog } from './cron-execution-log.js';
+import { CronNoopDetector } from './cron-noop-detector.js';
 import type { CronDefinition } from '../types/index.js';
 import { TelegramAPI } from '../telegram/api.js';
 import { TelegramPoller } from '../telegram/poller.js';
 import { resolvePaths } from '../utils/paths.js';
 import { resolveEnv } from '../utils/env.js';
+import { logEvent } from '../bus/event.js';
+import { sendMessage } from '../bus/message.js';
 import { recordInboundTelegram, cacheLastSent, logOutboundMessage, buildRecentHistory } from '../telegram/logging.js';
 import { collectTelegramCommands, registerTelegramCommands } from '../bus/metrics.js';
 import { stripControlChars } from '../utils/validate.js';
 import { processMediaMessage } from '../telegram/media.js';
 import { evaluateShift } from './shift.js';
-import { logEvent } from '../bus/event.js';
 import { stripBom } from '../utils/strip-bom.js';
 import { normalizeAllowedUser } from './allowed-user.js';
 import { confirmSupportAccessOnFirstContact } from '../cli/support-access-notify.js';
@@ -46,6 +49,8 @@ export class AgentManager {
   private workers: Map<string, WorkerProcess> = new Map();
   /** Daemon-level cron scheduler registry: one CronScheduler per enabled agent. */
   private cronSchedulers: Map<string, CronScheduler> = new Map();
+  /** Post-fire verifier that confirms Claude cron prompts reached the REPL transcript. */
+  private cronNoopDetector: CronNoopDetector;
   // Tracks agents that received a start request while still stopping.
   // stopAgent() honors these after cleanup completes so restart-all is race-free.
   private pendingRestarts: Set<string> = new Set();
@@ -73,6 +78,36 @@ export class AgentManager {
     if (this.daemonJustCrashed) {
       console.log('[agent-manager] Detected .daemon-crashed marker(s) — previous daemon exited abnormally. Will quiet BUG-011 alarm for this startup cycle.');
     }
+    this.cronNoopDetector = new CronNoopDetector({
+      appendExecutionLog,
+      emitEvent: (agentName, event, severity, meta) => {
+        try {
+          const resolvedOrg = this.resolveAgentOrg(agentName);
+          const paths = resolvePaths(agentName, this.instanceId, resolvedOrg);
+          logEvent(paths, agentName, resolvedOrg || '', 'action', event, severity, meta);
+        } catch (err) {
+          console.log(`[cron-noop-detector] logEvent failed for ${agentName}/${event} (non-fatal): ${err}`);
+        }
+      },
+      getStatus: (agentName) => this.getAgentStatus(agentName),
+      inject: (agentName, text) => this.injectAgentDetailed(agentName, text),
+      hasActivitySince: (agentName, firedAt) => this.hasPostCronActivity(agentName, firedAt),
+      notifyOrchestrator: (agentName, text) => {
+        try {
+          const resolvedOrg = this.resolveAgentOrg(agentName);
+          const orchestratorName = this.resolveOrgOrchestrator(resolvedOrg);
+          if (!orchestratorName) {
+            console.log(`[cron-noop-detector] no orchestrator configured for org ${resolvedOrg}; persistent no-op notice not sent`);
+            return;
+          }
+          const paths = resolvePaths(agentName, this.instanceId, resolvedOrg);
+          sendMessage(paths, 'daemon', orchestratorName, 'normal', text);
+        } catch (err) {
+          console.log(`[cron-noop-detector] orchestrator notify failed for ${agentName} (non-fatal): ${err}`);
+        }
+      },
+      logger: (msg) => console.log(msg),
+    });
   }
 
   /**
@@ -320,6 +355,80 @@ export class AgentManager {
 
     // Ultimate fallback: daemon's startup org (single-org install behavior)
     return this.org;
+  }
+
+  private resolveOrgOrchestrator(org: string | undefined): string | null {
+    if (!org) return null;
+    try {
+      const contextJson = readFileSync(join(this.frameworkRoot, 'orgs', org, 'context.json'), 'utf-8');
+      const parsed = JSON.parse(contextJson);
+      return typeof parsed.orchestrator === 'string' && parsed.orchestrator ? parsed.orchestrator : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private hasPostCronActivity(agentName: string, firedAt: string): boolean {
+    const firedMs = Date.parse(firedAt);
+    if (!Number.isFinite(firedMs)) return false;
+
+    const resolvedOrg = this.resolveAgentOrg(agentName);
+    const paths = resolvePaths(agentName, this.instanceId, resolvedOrg);
+    return this.eventLogConfirmsActivity(paths.analyticsDir, agentName, firedMs);
+  }
+
+  private eventLogConfirmsActivity(analyticsDir: string, agentName: string, firedMs: number): boolean {
+    const eventsDir = join(analyticsDir, 'events', agentName);
+    if (!existsSync(eventsDir)) return false;
+
+    const dates = new Set([
+      new Date(firedMs).toISOString().slice(0, 10),
+      new Date().toISOString().slice(0, 10),
+    ]);
+
+    for (const date of dates) {
+      const eventPath = join(eventsDir, `${date}.jsonl`);
+      if (!existsSync(eventPath)) continue;
+      if (this.eventFileHasPostCronActivity(eventPath, firedMs)) return true;
+    }
+    return false;
+  }
+
+  private eventFileHasPostCronActivity(eventPath: string, firedMs: number): boolean {
+    const detectorEvents = new Set([
+      'cron_fire_unconfirmed',
+      'cron_fire_reinjected',
+      'cron_fire_noop_persistent',
+      'cron_fire_confirmed_by_activity',
+    ]);
+
+    try {
+      for (const line of readFileSync(eventPath, 'utf-8').split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        let event: any;
+        try {
+          event = JSON.parse(trimmed);
+        } catch {
+          continue;
+        }
+
+        if (detectorEvents.has(String(event.event || ''))) continue;
+        const tsMs = Date.parse(String(event.timestamp || ''));
+        if (!Number.isFinite(tsMs) || tsMs < firedMs) continue;
+
+        if (event.category === 'heartbeat') {
+          const status = String(event.metadata?.status || '');
+          if (status.startsWith('[watchdog]')) continue;
+        }
+
+        return true;
+      }
+    } catch {
+      return false;
+    }
+
+    return false;
   }
 
   /**
@@ -579,6 +688,10 @@ export class AgentManager {
     // Reset watchdog session state on actual transitions back to running.
     let prevStatusForReset: string | null = null;
     agentProcess.onStatusChanged((status) => {
+      // Cancel any in-flight cron no-op verifications when the agent leaves running.
+      if (status.status !== 'running') {
+        this.cronNoopDetector.cancelAgentVerifications(name);
+      }
       if (status.status === 'running' && prevStatusForReset !== 'running') {
         checker.resetWatchdogState();
       }
@@ -723,8 +836,15 @@ export class AgentManager {
       registerTelegramCommands(botToken, commands).then((result) => {
         if (result.status === 'ok') {
           log(`Telegram commands registered (${result.count} commands)`);
+        } else if (result.status !== 'empty') {
+          // Surface failures instead of swallowing them silently: a failed
+          // registration means the agent's slash menu is missing until the next
+          // restart, so operators need to see it (non-fatal to agent startup).
+          log(`Telegram command registration failed after retries: ${result.error}`);
         }
-      }).catch(() => { /* non-fatal */ });
+      }).catch((err) => {
+        log(`Telegram command registration error: ${String(err)}`);
+      });
     }
 
     // Start Telegram poller if credentials are available and not explicitly disabled.
@@ -798,6 +918,7 @@ export class AgentManager {
 
         // Check for media messages (photo, document, voice, audio, video, video_note)
         const isMedia = !!(msg.photo || msg.document || msg.voice || msg.audio || msg.video || msg.video_note);
+        const replyToText = buildReplyContext(msg.reply_to_message);
 
         if (isMedia && telegramApi) {
           const downloadDir = join(agentDir, 'telegram-images');
@@ -805,7 +926,7 @@ export class AgentManager {
             if (!media) {
               log('Media processing returned null - falling back to text format');
               const text = stripControlChars(msg.caption || '');
-              const formatted = FastChecker.formatTelegramTextMessage(from, effectiveChatId, text, this.frameworkRoot);
+              const formatted = FastChecker.formatTelegramTextMessage(from, effectiveChatId, text, this.frameworkRoot, replyToText);
               if (!checker.isDuplicate(formatted)) checker.queueTelegramMessage(formatted);
               return;
             }
@@ -823,14 +944,14 @@ export class AgentManager {
             log(`[DEBUG] media.type=${media.type} image_path=${JSON.stringify(relImagePath)} file_path=${JSON.stringify(relFilePath)}`);
             let formatted: string;
             if (media.type === 'photo') {
-              formatted = FastChecker.formatTelegramPhotoMessage(from, effectiveChatId, media.text, relImagePath);
+              formatted = FastChecker.formatTelegramPhotoMessage(from, effectiveChatId, media.text, relImagePath, replyToText);
             } else if (media.type === 'document') {
-              formatted = FastChecker.formatTelegramDocumentMessage(from, effectiveChatId, media.text, relFilePath, media.file_name!);
+              formatted = FastChecker.formatTelegramDocumentMessage(from, effectiveChatId, media.text, relFilePath, media.file_name!, replyToText);
             } else if (media.type === 'voice' || media.type === 'audio') {
-              formatted = FastChecker.formatTelegramVoiceMessage(from, effectiveChatId, relFilePath, media.duration, media.transcript);
+              formatted = FastChecker.formatTelegramVoiceMessage(from, effectiveChatId, relFilePath, media.duration, media.transcript, replyToText);
             } else {
               // video or video_note
-              formatted = FastChecker.formatTelegramVideoMessage(from, effectiveChatId, media.text, relFilePath, media.file_name || '', media.duration);
+              formatted = FastChecker.formatTelegramVideoMessage(from, effectiveChatId, media.text, relFilePath, media.file_name || '', media.duration, replyToText);
             }
 
             if (checker.isDuplicate(formatted)) {
@@ -842,7 +963,7 @@ export class AgentManager {
           }).catch((err) => {
             log(`Media processing error: ${err} - falling back to text format`);
             const text = stripControlChars(msg.caption || '');
-            const formatted = FastChecker.formatTelegramTextMessage(from, effectiveChatId, text, this.frameworkRoot);
+            const formatted = FastChecker.formatTelegramTextMessage(from, effectiveChatId, text, this.frameworkRoot, replyToText);
             if (!checker.isDuplicate(formatted)) checker.queueTelegramMessage(formatted);
           });
           return;
@@ -851,8 +972,6 @@ export class AgentManager {
         // Text message (non-media)
         const text = stripControlChars(msg.text || '');
         const lastSent = FastChecker.readLastSent(stateDir, effectiveChatId);
-        // Build reply context from the replied-to message.
-        const replyToText = buildReplyContext(msg.reply_to_message);
 
         const recentHistory = buildRecentHistory(this.ctxRoot, name, effectiveChatId, 6) ?? undefined;
         const formatted = FastChecker.formatTelegramTextMessage(
@@ -1148,6 +1267,7 @@ export class AgentManager {
     if (entry.poller) entry.poller.stop();
     if (entry.activityPoller) entry.activityPoller.stop();
     if (entry.slackListener) entry.slackListener.stop();
+    this.cronNoopDetector.cancelAgentVerifications(name);
     entry.checker.stop();
     await entry.process.stop();
     this.agents.delete(name);
@@ -1467,7 +1587,7 @@ export class AgentManager {
     const onFire = async (cron: CronDefinition): Promise<void> => {
       const prompt = cron.prompt ?? `[cron] ${cron.name} fired`;
 
-      // Shift gate (RFC orgs/ascendops/docs/rfc-shift-schedule.md §4).
+      // Shift gate (RFC your org internal docs §4).
       // When the agent is off-shift, drop the cron fire silently and emit a
       // cron_suppressed_off_shift event for telemetry. Crons with
       // wake_on_fire=true bypass this gate (see CronDefinition.wake_on_fire).
@@ -1501,6 +1621,22 @@ export class AgentManager {
       const injected = this.injectAgent(agentName, injection);
       if (!injected) {
         throw new Error(`injectAgent returned false for agent "${agentName}" — agent may not be running`);
+      }
+      try {
+        const entry = this.agents.get(agentName);
+        const config = entry?.process.getConfig();
+        if (entry && config) {
+          this.cronNoopDetector.registerFire({
+            agentName,
+            agentDir: entry.process.getAgentDir(),
+            config,
+            cronName: cron.name,
+            prompt,
+            firedAt,
+          });
+        }
+      } catch (err) {
+        console.log(`[cron-noop-detector] register failed for ${agentName}/${cron.name} (non-fatal): ${err}`);
       }
     };
 
@@ -1673,13 +1809,20 @@ export function buildReplyContext(
   replyMsg: TelegramMessage | undefined,
 ): string | undefined {
   if (!replyMsg) return undefined;
-  if (replyMsg.text) return stripControlChars(replyMsg.text);
-  if (replyMsg.caption) return stripControlChars(replyMsg.caption);
-  if (replyMsg.video) return '[video]';
-  if (replyMsg.video_note) return '[video note]';
-  if (replyMsg.photo) return '[photo]';
-  if (replyMsg.voice) return '[voice message]';
-  if (replyMsg.audio) return '[audio]';
-  if (replyMsg.document) return `[document: ${replyMsg.document.file_name ?? 'file'}]`;
+  const parts: string[] = [];
+  if (replyMsg.text) {
+    parts.push(stripControlChars(replyMsg.text));
+  } else if (replyMsg.caption) {
+    parts.push(stripControlChars(replyMsg.caption));
+  }
+
+  if (replyMsg.document) parts.push(`[document: ${replyMsg.document.file_name ?? 'file'}]`);
+  if (replyMsg.photo) parts.push('[photo]');
+  if (replyMsg.video) parts.push('[video]');
+  if (replyMsg.video_note) parts.push('[video note]');
+  if (replyMsg.voice) parts.push('[voice message]');
+  if (replyMsg.audio) parts.push('[audio]');
+
+  if (parts.length > 0) return parts.join('\n');
   return undefined;
 }

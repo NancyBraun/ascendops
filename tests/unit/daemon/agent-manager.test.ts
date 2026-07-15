@@ -12,12 +12,14 @@ const agentStatusCallbacks = vi.hoisted(() => new Map<string, (status: any) => v
 vi.mock('../../../src/daemon/agent-process.js', () => ({
   AgentProcess: class {
     name: string;
-    dir: string;
+    dir: any;
+    config: any;
     telegramApi: { sendMessage: (chatId: string, text: string) => Promise<unknown> } | null = null;
     telegramChatId: string | null = null;
-    constructor(name: string, dir: string) {
+    constructor(name: string, dir: any, config?: any) {
       this.name = name;
       this.dir = dir;
+      this.config = config ?? {};
     }
     async start(options?: { partOfFleetStart?: boolean }) {
       // Fresh-start wire-boundary model: without the fleet marker, the
@@ -34,6 +36,9 @@ vi.mock('../../../src/daemon/agent-process.js', () => ({
       this.telegramApi = api;
       this.telegramChatId = chatId;
     }
+    getAgentDir() { return typeof this.dir === 'string' ? this.dir : this.dir?.agentDir; }
+    getConfig() { return this.config; }
+    injectMessage() { return true; }
     onExit() { /* no-op */ }
     onStatusChanged(cb: (status: any) => void) {
       agentStatusCallbacks.set(this.name, cb);
@@ -463,7 +468,17 @@ describe('buildReplyContext - Telegram reply context (BUG fix: media replies los
 
   it('returns caption for media messages with captions', () => {
     const msg = { message_id: 2, chat: { id: 1 }, photo: [{ file_id: 'x', width: 100, height: 100, file_size: 1 }], caption: 'Check this out' };
-    expect(buildReplyContext(msg)).toBe('Check this out');
+    expect(buildReplyContext(msg)).toBe('Check this out\n[photo]');
+  });
+
+  it('returns caption plus document name for document replies with captions', () => {
+    const msg = {
+      message_id: 12,
+      chat: { id: 1 },
+      caption: 'Code review done — full HTML breakdown attached.',
+      document: { file_id: 'd3', file_name: 'hermes-memory-review.html' },
+    };
+    expect(buildReplyContext(msg)).toBe('Code review done — full HTML breakdown attached.\n[document: hermes-memory-review.html]');
   });
 
   it('returns [video] for video messages without caption', () => {

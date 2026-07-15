@@ -1,5 +1,5 @@
 // Gemini CLI vendor adapter — migration step #3 of multi-model adapter MVP.
-// Sources: orgs/ascendops/docs/multi-model-rfc-amendment.md §4 + CAO
+// Sources: your org internal docs §4 + CAO
 // gemini_cli.py reference (~/cortextos-reference/cli-agent-orchestrator).
 //
 // Constants per delta doc §4 + CAO patterns:

@@ -89,6 +89,20 @@ describe('createApproval', () => {
     expect(approval.org).toBe('TestOrg');
   });
 
+  it('scrubs SSNs from the at-rest approval JSON (title + context)', async () => {
+    const id = await createApproval(
+      paths, 'alice', 'TestOrg',
+      'Send tenant SSN 123-45-6789 to vendor', 'external-comms',
+      'context: resident ssn 987654321 needs confirming', frameworkRoot,
+    );
+    const pendingFile = join(paths.approvalDir, 'pending', `${id}.json`);
+    const approval = JSON.parse(readFileSync(pendingFile, 'utf-8'));
+    expect(approval.title).toBe('Send tenant SSN [REDACTED-SSN] to vendor');
+    expect(approval.description).toBe('context: resident ssn [REDACTED-SSN] needs confirming');
+    expect(JSON.stringify(approval)).not.toContain('123-45-6789');
+    expect(JSON.stringify(approval)).not.toContain('987654321');
+  });
+
   it('posts to the activity channel with Approve/Deny inline keyboard (framework orgDir, not ctxRoot)', async () => {
     const id = await createApproval(paths, 'alice', 'TestOrg', 'Push to main', 'deployment', 'rationale', frameworkRoot);
 

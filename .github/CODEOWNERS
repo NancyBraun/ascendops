@@ -1,0 +1,9 @@
+# Leak-guard machinery — any change requires owner review (SEC-1 F1).
+# Keep this list in sync with the guard's exact-path self-skip in
+# .github/scripts/leak-guard.sh.
+/.github/scripts/leak-guard.sh @noogalabs
+/.github/workflows/leak-guard.yml @noogalabs
+/tests/leak-guard.test.sh @noogalabs
+/.github/CODEOWNERS @noogalabs
+# .gitignore defines the tracked/public surface (carve-out re-includes) the guard reasons over.
+/.gitignore @noogalabs

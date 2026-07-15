@@ -189,6 +189,144 @@ describe('TelegramAPI.sendMessage HTML mode', () => {
   });
 });
 
+// ===========================================================================
+// PII v2 m2 — F4: markup-interleaved NEW-ENTRY egress leak through the REAL
+// Telegram send path (raw redactSSN → markdownToHtml → redactSSNMarkupAware).
+//
+// The leak (F4, net-new P1 on PR #145): an emphasis marker interleaved in an
+// EIN/routing/bank value (`EIN 12-345*6789*`) breaks the digit run so the raw
+// redactSSN misses it; markdownToHtml strips the marker (turning `*…*` into a
+// <b> tag Telegram renders away); and the SSN-ONLY redactSSNMarkupAware used to
+// MISS it (it knew only SSN), so the reconstructed PII rendered VISIBLE off-host.
+//
+// The fix made redactSSNMarkupAware REGISTRY-DRIVEN (iterates PII_REGISTRY), so
+// every entry — and any FUTURE entry — gets markup-aware egress. These tests
+// drive the value through the ACTUAL sendMessage path and assert the rendered
+// Telegram payload (body.text with tags+invisibles stripped) carries NO complete
+// PII value, at EVERY interior split position and across <b>/<i>/<em> tag
+// variants, while legit emphasis around non-PII is NOT over-redacted.
+// ===========================================================================
+describe('TelegramAPI.sendMessage — F4 markup-interleaved new-entry egress (no visible PII)', () => {
+  // `render` = what Telegram actually DISPLAYS: strip the HTML tags markdownToHtml
+  // produced (rendered invisibly) plus format-control chars, exactly like the SSN
+  // markup test's visibleHasSsn. The security invariant is asserted on THIS text:
+  // the complete PII digit value must never survive here.
+  const render = (html: string): string =>
+    html
+      .replace(/<[^>]*>/g, '')
+      .replace(/[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu, '');
+
+  // Send `raw` through the REAL path (raw redactSSN → markdownToHtml →
+  // redactSSNMarkupAware → fetch payload); return the rendered (tag-stripped)
+  // body.text — the exact bytes Telegram would display.
+  async function sendAndRender(raw: string): Promise<string> {
+    queue({ status: 200, body: { ok: true, result: { message_id: 1 } } });
+    const api = new TelegramAPI('111:AAA');
+    await api.sendMessage('chat1', raw);
+    return render(callLog[callLog.length - 1].body.text as string);
+  }
+
+  // The RECONSTRUCTION vectors are the markdown emphasis markers markdownToHtml
+  // turns into LIVE tags Telegram renders away — `*…*`→<b>, `` `…` ``→<code>.
+  // (`_…_`→<i> is word-boundary-guarded so it stays LITERAL between digits, which
+  // visibly BREAKS the value rather than reconstructing it — covered by the
+  // security-invariant assertion below, not the redaction assertion.) Passing
+  // literal `<b>` as input is NOT a vector: markdownToHtml HTML-escapes `<`/`>`
+  // to `&lt;`/`&gt;`, which Telegram shows verbatim, breaking (not reconstructing)
+  // the value. So the faithful interior-split sweep uses `*` and backtick.
+  const MARKERS: Array<{ name: string; open: string; close: string }> = [
+    { name: 'markdown-* (bold→<b>)', open: '*', close: '*' },
+    { name: 'markdown-` (code→<code>)', open: '`', close: '`' },
+  ];
+
+  // Each entry: a labeled value and the full digit string whose visible survival
+  // in the rendered output would be the leak. EIN formatted (Pass 2 always
+  // redacts), routing bare-9 (label-gated), bank 12-digit (label-gated candidate).
+  const ENTRIES: Array<{ name: string; prefix: string; value: string; digits: string }> = [
+    { name: 'EIN', prefix: 'EIN ', value: '12-3456789', digits: '123456789' },
+    { name: 'routing', prefix: 'routing ', value: '021000021', digits: '021000021' },
+    { name: 'bank', prefix: 'bank account ', value: '123456789012', digits: '123456789012' },
+  ];
+
+  for (const { name, prefix, value, digits } of ENTRIES) {
+    for (const mk of MARKERS) {
+      it(`${name}: ${mk.name} marker at every interior split → reconstructed value redacted`, async () => {
+        for (let i = 1; i < value.length; i++) {
+          const raw = `${prefix}${value.slice(0, i)}${mk.open}${value.slice(i)}${mk.close}`;
+          const rendered = await sendAndRender(raw);
+          // SECURITY INVARIANT: the complete PII value never renders.
+          expect(rendered).not.toContain(digits);
+          // The marker reconstructs the digit run into a live tag span, so the
+          // registry-driven markup scrubber MUST have redacted it.
+          expect(rendered).toContain('[REDACTED');
+        }
+      });
+    }
+  }
+
+  it('classic F4 repros (markdown markers) render no visible PII', async () => {
+    // The exact split positions called out in the finding, via the real markdown
+    // reconstruction vector (`*`).
+    const repros = [
+      'EIN 12-345*6789*',
+      'routing 021*000021*',
+      'bank account 123*456*789012',
+      'account number 1234*5678*',
+    ];
+    for (const raw of repros) {
+      const rendered = await sendAndRender(raw);
+      expect(/\b\d{9}\b/.test(rendered)).toBe(false);
+      expect(/\d{12}/.test(rendered)).toBe(false);
+      expect(rendered).toContain('[REDACTED');
+    }
+  });
+
+  it('literal-tag / underscore inputs are visibly BROKEN, not reconstructed (no leak)', async () => {
+    // These are NOT reconstruction vectors: `<b>` is HTML-escaped to visible
+    // `&lt;b&gt;`, and `_` between digits stays literal (word-boundary guard). The
+    // value is visibly broken in the rendered output, so the security invariant
+    // (no complete PII value) still holds even though nothing is redacted.
+    for (const raw of [
+      'EIN 12<b>-3456789</b>',
+      'routing 021_000021_',
+      'bank account 1234_56789012_',
+    ]) {
+      const rendered = await sendAndRender(raw);
+      expect(/\b\d{9}\b/.test(rendered)).toBe(false);
+      expect(/\d{12}/.test(rendered)).toBe(false);
+    }
+  });
+
+  it('SSN markup path stays green through the real send path (27th-finding byte-identity guard)', async () => {
+    // Same class as the original "27th finding" SSN markdown-reconstruction HIGH —
+    // must still be closed after the registry rewrite.
+    for (const raw of [
+      'SSN 123-45-*6789*',
+      'SSN *123*-45-6789',
+      'SSN 123-*45*-6789',
+      'SSN: 987*654*321',
+    ]) {
+      const rendered = await sendAndRender(raw);
+      expect(/\d{3}[-.\s]?\d{2}[-.\s]?\d{4}/.test(rendered)).toBe(false);
+      expect(/\b\d{9}\b/.test(rendered)).toBe(false);
+      expect(rendered).toContain('[REDACTED-SSN]');
+    }
+  });
+
+  it('does NOT over-redact legit emphasis around non-PII (bold text, bolded name, phone)', async () => {
+    const cases: Array<[string, string]> = [
+      ['*bold text* here', 'bold text here'],
+      ['call *Alex* at 423-555-1212', 'call Alex at 423-555-1212'],
+      ['the *important* note', 'the important note'],
+    ];
+    for (const [raw, expectedRendered] of cases) {
+      const rendered = await sendAndRender(raw);
+      expect(rendered).toBe(expectedRendered);
+      expect(rendered).not.toContain('[REDACTED');
+    }
+  });
+});
+
 describe('TelegramAPI.sendMessage self_chat runtime safety net', () => {
   it('emits a one-time console.warn when Telegram returns the bot-recipient 403', async () => {
     queue({

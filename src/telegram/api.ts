@@ -5,6 +5,7 @@
 
 import { existsSync, readFileSync } from 'fs';
 import { basename } from 'path';
+import { redactSSN, redactSSNMarkupAware } from '../utils/ssn-redaction.js';
 
 /**
  * Result of TelegramAPI.validateCredentials. Tagged union so callers can
@@ -78,6 +79,27 @@ export function formatValidateError(result: Extract<ValidateCredentialsResult, {
     case 'rate_limited':
       return `Telegram API rate-limited the validation probe (${result.detail}). Retry in a few seconds.`;
   }
+}
+
+/**
+ * Recursively scrub SSNs from every string value in a Telegram `reply_markup`
+ * object (inline-keyboard button labels, etc.). The message text is scrubbed at
+ * the send methods, but the inline keyboard is structured connector-derived
+ * data too — an AskUserQuestion option label like `Tenant 123-45-6789` would
+ * otherwise reach Telegram raw. Returns a scrubbed deep copy; the input is not
+ * mutated.
+ */
+function redactReplyMarkup<T>(markup: T): T {
+  if (typeof markup === 'string') return redactSSN(markup) as unknown as T;
+  if (Array.isArray(markup)) return markup.map((v) => redactReplyMarkup(v)) as unknown as T;
+  if (markup && typeof markup === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(markup as Record<string, unknown>)) {
+      out[k] = redactReplyMarkup(v);
+    }
+    return out as unknown as T;
+  }
+  return markup;
 }
 
 export class TelegramAPI {
@@ -198,8 +220,21 @@ export class TelegramAPI {
       onParseFallback?: (reason: string) => void;
     },
   ): Promise<any> {
+    // Scrub at the egress primitive: every Telegram sender flows through here
+    // (CLI send-telegram, approvals, daemon alerts, agent-output streaming,
+    // PTY), so scrubbing once covers all of them — never SHARE an SSN to chat.
+    text = redactSSN(text);
     const plainText = opts?.parseMode === null;
-    const html = this.markdownToHtml(text, plainText);
+    let html = this.markdownToHtml(text, plainText);
+    // SECOND scrub on the RENDERED HTML: markdownToHtml turns emphasis markers
+    // (*bold*/_italic_/`code`) into <b>/<i>/<code> tags Telegram renders
+    // invisibly, so an SSN split by a marker (`123-45-*6789*`) evades the
+    // raw-text redactSSN above and would render reassembled. redactSSNMarkupAware
+    // tolerates the tags between digits and redacts the whole span. Run before
+    // splitHtml so a whole-message SSN is caught before any chunk split. The
+    // plainText path has no tags (markdownToHtml returns raw) and is already
+    // covered by the raw redactSSN, so it is skipped.
+    if (!plainText) html = redactSSNMarkupAware(html);
 
     await this.rateLimit(String(chatId));
 
@@ -231,7 +266,7 @@ export class TelegramAPI {
     const basePayload: Record<string, unknown> = {
       chat_id: chatId,
       text,
-      ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+      ...(replyMarkup ? { reply_markup: redactReplyMarkup(replyMarkup) } : {}),
     };
 
     const payload =
@@ -282,10 +317,10 @@ export class TelegramAPI {
     formData.append('chat_id', String(chatId));
     formData.append('photo', new Blob([fileData]), fileName);
     if (caption) {
-      formData.append('caption', caption);
+      formData.append('caption', redactSSN(caption));
     }
     if (replyMarkup) {
-      formData.append('reply_markup', JSON.stringify(replyMarkup));
+      formData.append('reply_markup', JSON.stringify(redactReplyMarkup(replyMarkup)));
     }
 
     try {
@@ -333,10 +368,10 @@ export class TelegramAPI {
     formData.append('chat_id', String(chatId));
     formData.append('document', new Blob([fileData]), fileName);
     if (caption) {
-      formData.append('caption', caption);
+      formData.append('caption', redactSSN(caption));
     }
     if (replyMarkup) {
-      formData.append('reply_markup', JSON.stringify(replyMarkup));
+      formData.append('reply_markup', JSON.stringify(redactReplyMarkup(replyMarkup)));
     }
 
     try {
@@ -519,7 +554,7 @@ export class TelegramAPI {
   async answerCallbackQuery(callbackQueryId: string, text?: string): Promise<any> {
     return this.post('answerCallbackQuery', {
       callback_query_id: callbackQueryId,
-      text: text || 'OK',
+      text: (text ? redactSSN(text) : '') || 'OK',
     });
   }
 
@@ -566,8 +601,8 @@ export class TelegramAPI {
     return this.post('editMessageText', {
       chat_id: chatId,
       message_id: messageId,
-      text,
-      ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+      text: redactSSN(text),
+      ...(replyMarkup ? { reply_markup: redactReplyMarkup(replyMarkup) } : {}),
     });
   }
 

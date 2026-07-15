@@ -121,7 +121,7 @@ export function computeHealth(
   // ── 24h metrics ───────────────────────────────────────────────────────────
 
   const firesLast24h = executionsLast24h.length;
-  const successCount = executionsLast24h.filter(e => e.status === 'fired').length;
+  const successCount = executionsLast24h.filter(e => e.status === 'fired' || e.status === 'confirmed').length;
   const successRate24h = firesLast24h > 0 ? successCount / firesLast24h : 1;
 
   // ── State machine ─────────────────────────────────────────────────────────
@@ -151,6 +151,18 @@ export function computeHealth(
   if (lastStatus === 'failed') {
     return makeHealth(agent, org, cron.name, nextFire, 'failure',
       `most recent execution failed (${formatRelativeMs(gapMs!)} ago)`,
+      lastFireMs, expectedIntervalMs, gapMs, successRate24h, firesLast24h);
+  }
+
+  if (lastStatus === 'noop_persistent') {
+    return makeHealth(agent, org, cron.name, nextFire, 'failure',
+      'persistent cron no-op detected after re-inject verification',
+      lastFireMs, expectedIntervalMs, gapMs, successRate24h, firesLast24h);
+  }
+
+  if (lastStatus === 'noop_unconfirmed' || lastStatus === 'noop_reinjected') {
+    return makeHealth(agent, org, cron.name, nextFire, 'warning',
+      `most recent cron fire was not confirmed by transcript detector (${lastStatus})`,
       lastFireMs, expectedIntervalMs, gapMs, successRate24h, firesLast24h);
   }
 

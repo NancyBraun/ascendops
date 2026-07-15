@@ -28,6 +28,8 @@
  * indefinitely. See the chunk-boundary tests in output-buffer.test.ts.
  */
 
+import { redactSSN } from '../utils/ssn-redaction.js';
+
 /**
  * JWT shape: three base64url segments separated by dots, each at least
  * 10 characters long. The length qualifier prevents false positives on
@@ -39,15 +41,27 @@
 const JWT_PATTERN = /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g;
 
 /**
- * Redact JWT-shaped tokens from a PTY output chunk.
+ * Redact secret-bearing tokens from a PTY output chunk.
  *
- * Replaces each JWT with the literal string `[REDACTED_JWT]` in-place.
- * Non-token content (TUI ANSI escapes, regular stdout, shell prompts,
- * etc.) passes through unchanged. Safe to call on every PTY chunk — the
- * regex is stateless and scales linearly with input length.
+ * Replaces each JWT with `[REDACTED_JWT]` and each Social Security Number
+ * with `[REDACTED-SSN]`, in-place. Non-token content (TUI ANSI escapes,
+ * regular stdout, shell prompts, etc.) passes through unchanged. Safe to
+ * call on every PTY chunk — the regexes are stateless and scale linearly
+ * with input length.
+ *
+ * SSN scrubbing here is the conservative ruleset (formatted + per-chunk
+ * context-keyed) — see `redactSSN`. The common same-chunk case
+ * (`SSN: 123-45-6789`) is caught directly. A label and its number split across
+ * a chunk boundary is CLOSED by the label-region and mid-label holdbacks in
+ * OutputBuffer.push() (`splitTrailingPartialSsnLabel` /
+ * `splitTrailingPartialSsnLabelPrefix`), and a formatted SSN split across the
+ * boundary is reassembled via the partial-SSN holdback. See SPEC.md
+ * "Label-context separation dimensions" for the closed forms and the bounded
+ * residuals (1-char-aligned label split; number-mid-run past the holdback
+ * window).
  */
 export function redactSecrets(data: string): string {
-  return data.replace(JWT_PATTERN, '[REDACTED_JWT]');
+  return redactSSN(data.replace(JWT_PATTERN, '[REDACTED_JWT]'));
 }
 
 /**

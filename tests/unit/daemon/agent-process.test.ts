@@ -390,8 +390,9 @@ describe('AgentProcess - crashCount NaN-guard (bug-hunt #8)', () => {
 });
 
 describe('AgentProcess onboarding fallback', () => {
-  it('keeps the fresh-start back-online instruction for a lone start', () => {
+  it('keeps the fresh-start back-online instruction for a lone Telegram-enabled start', () => {
     const ap = new AgentProcess('alice', mockEnv, {});
+    ap.setTelegramHandle({ sendChatAction: vi.fn(), sendMessage: vi.fn().mockResolvedValue(undefined) } as any, '12345');
     const prompt = (ap as any).buildStartupPrompt(null) as string;
 
     expect(prompt).toContain('Send a Telegram message to the user saying you are back online.');
@@ -626,5 +627,96 @@ describe('AgentProcess — CrashLoopPauser (instar-inspired sliding window)', ()
     }
     // Should be 'crashed' (recovering), NOT 'halted', because daily max is 5
     expect(ap.getStatus().status).not.toBe('halted');
+  });
+});
+
+describe('AgentProcess - onboarding marker (do not auto-write .onboarded on heartbeat)', () => {
+  // Regression: buildStartupPrompt used to auto-write the .onboarded marker
+  // whenever a heartbeat.json existed, on the assumption the agent had
+  // onboarded and just forgot the marker. That silently suppressed FIRST BOOT
+  // for agents that were manually scaffolded (heartbeat present) but never
+  // actually ran onboarding. The marker must be explicit: a heartbeat alone
+  // must NOT mark an agent onboarded. This is general daemon behavior (it was
+  // surfaced via a manually-scaffolded opencode agent, but applies to any
+  // runtime).
+  it('does not auto-mark a heartbeat-only agent as onboarded (still routes to FIRST BOOT)', async () => {
+    fsMocks.existsSync.mockImplementation((path: string) => {
+      if (path.endsWith('/.force-fresh')) return false;
+      if (path.endsWith('/.onboarded')) return false;
+      if (path.endsWith('/heartbeat.json')) return true;
+      if (path.endsWith('/ONBOARDING.md')) return true;
+      return false;
+    });
+
+    const ap = new AgentProcess('alice', mockEnv, {});
+    await ap.start();
+
+    const prompt = mockPty.spawn.mock.calls[0]?.[1] ?? '';
+    expect(prompt).toContain('FIRST BOOT');
+    expect(prompt).toContain('read ONBOARDING.md and complete the onboarding protocol');
+    // The buggy auto-write must be gone: no .onboarded written from heartbeat presence.
+    expect(fsMocks.writeFileSync).not.toHaveBeenCalledWith(
+      expect.stringContaining('/.onboarded'),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it('respects an existing .onboarded marker (suppresses FIRST BOOT)', async () => {
+    fsMocks.existsSync.mockImplementation((path: string) => {
+      if (path.endsWith('/.force-fresh')) return false;
+      if (path.endsWith('/.onboarded')) return true;
+      if (path.endsWith('/heartbeat.json')) return true;
+      if (path.endsWith('/ONBOARDING.md')) return true;
+      return false;
+    });
+
+    const ap = new AgentProcess('alice', mockEnv, {});
+    await ap.start();
+
+    const prompt = mockPty.spawn.mock.calls[0]?.[1] ?? '';
+    expect(prompt).not.toContain('FIRST BOOT');
+    expect(prompt).not.toContain('complete the onboarding protocol');
+  });
+
+  // OURS-PATH (reconcile follow-on): our 2d129a68 bootstrap-content arm survives.
+  // No .onboarded marker, no heartbeat — but IDENTITY.md + MEMORY.md have real
+  // non-template content. The daemon MUST retro-write .onboarded and suppress
+  // FIRST BOOT (heartbeat alone is no longer sufficient post-#667 reconcile).
+  it('retro-writes .onboarded and suppresses FIRST BOOT when IDENTITY/MEMORY have non-template content (our bootstrap-content arm survives reconcile)', async () => {
+    fsMocks.existsSync.mockImplementation((path: string) => {
+      if (path.endsWith('/.force-fresh')) return false;
+      if (path.endsWith('/.onboarded')) return false;
+      if (path.endsWith('/heartbeat.json')) return false;     // no heartbeat — arm must not be needed
+      if (path.endsWith('/ONBOARDING.md')) return true;       // present so FIRST BOOT would fire without retro-write
+      if (path.endsWith('/IDENTITY.md')) return true;
+      if (path.endsWith('/MEMORY.md')) return true;
+      return false;
+    });
+
+    fsMocks.readFileSync.mockImplementation((p: unknown) => {
+      const path = String(p);
+      if (path.endsWith('/IDENTITY.md')) {
+        return `# Agent Identity\n\n## Name\nalice\n\n## Role\nResearch specialist for the team.\n`;
+      }
+      if (path.endsWith('/MEMORY.md')) {
+        return '# Long-Term Memory\n\nThis agent has been configured with substantial operating context and learned patterns that go well beyond the shipped template placeholder text.\n';
+      }
+      return '';
+    });
+
+    const ap = new AgentProcess('alice', mockEnv, {});
+    await ap.start();
+
+    // Bootstrap-content arm retro-writes the marker.
+    expect(fsMocks.writeFileSync).toHaveBeenCalledWith(
+      expect.stringContaining('/.onboarded'),
+      '',
+      'utf-8',
+    );
+    // With .onboarded now set, FIRST BOOT must be suppressed.
+    const prompt = mockPty.spawn.mock.calls[0]?.[1] ?? '';
+    expect(prompt).not.toContain('FIRST BOOT');
+    expect(prompt).not.toContain('complete the onboarding protocol');
   });
 });

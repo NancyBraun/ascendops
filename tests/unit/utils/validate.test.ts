@@ -62,6 +62,24 @@ describe('validateAgentName', () => {
   });
 });
 
+describe('validateTaskId', () => {
+  it('accepts generated task ids', () => {
+    expect(() => validateTaskId('task_1780609827_123')).not.toThrow();
+    expect(() => validateTaskId('task_1_001')).not.toThrow();
+    expect(() => validateTaskId('custom-task_42')).not.toThrow();
+  });
+
+  it('rejects path-traversal, separators, and uppercase', () => {
+    expect(() => validateTaskId('')).toThrow();
+    expect(() => validateTaskId('../../etc/passwd')).toThrow();
+    expect(() => validateTaskId('task/../../secrets')).toThrow();
+    expect(() => validateTaskId('task_1.json')).toThrow();    // dot
+    expect(() => validateTaskId('task 1')).toThrow();          // space
+    expect(() => validateTaskId('a/b')).toThrow();             // slash
+    expect(() => validateTaskId('Task_1')).toThrow();          // uppercase (not generator-shaped)
+  });
+});
+
 describe('validatePriority', () => {
   it('accepts valid priorities', () => {
     expect(() => validatePriority('urgent')).not.toThrow();

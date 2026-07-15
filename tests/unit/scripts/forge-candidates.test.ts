@@ -189,13 +189,17 @@ describe('forge-candidates', () => {
     // archive it too — otherwise the marker advances past it and the run record
     // silently loses part of what the build processed.
     const today = new Date().toISOString().split('T')[0];
+    // Stamp strictly in the past (1h ago) rather than a fixed `${today}T08:00:00Z`.
+    // consume's cutoff is wall-clock now (forge-candidates.mjs: include if
+    // stamp <= now), so a fixed 08:00Z stamp is in the FUTURE for any CI run
+    // before 08:00 UTC → the candidate is excluded → "Consumed 0" → this test
+    // flaked by time-of-day. A relative-past stamp is robust at every hour.
+    const pastTs = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     seedEvents('dane', today, [{
       id: 'busid-evonly',
       agent: 'dane',
       org: 'ascendops',
-      // Past-of-cutoff, time-independent. A hardcoded UTC hour flaked when CI ran
-      // before that hour (event became future-of-now and got filtered out).
-      timestamp: new Date(Date.now() - 60_000).toISOString(),
+      timestamp: pastTs,
       category: 'action',
       event: 'forge_candidate',
       severity: 'info',
@@ -214,8 +218,13 @@ describe('forge-candidates', () => {
 
   it('snapshot-binds consume to build-start: a candidate emitted AFTER the queue-read survives the next build (TOCTOU)', () => {
     const today = new Date().toISOString().split('T')[0];
+    // T1 must sit BEFORE the build-read cutoff (≈ now). A hardcoded `${today}T01:00:00Z`
+    // is in the FUTURE when the suite runs between 00:00–01:00 UTC, so the pre-read upper
+    // bound excludes it → q1.total flakes to 0. A relative-past stamp is robust at every
+    // hour (same fix already applied to the event-only sibling test above).
+    const t1Ts = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     const t1Event = {
-      id: 'ev-t1', agent: 'dane', org: 'ascendops', timestamp: new Date(Date.now() - 60_000).toISOString(), // past-of-cutoff, time-independent
+      id: 'ev-t1', agent: 'dane', org: 'ascendops', timestamp: t1Ts,
       category: 'action', event: 'forge_candidate', severity: 'info',
       metadata: { id: 'fc-t1', skill: 'built-a', slippage: 's', verdict: 'create-new', incident: `PR #1 ${today}`, confidence: 'high' },
     };

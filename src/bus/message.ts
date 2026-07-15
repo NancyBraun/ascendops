@@ -7,7 +7,8 @@ import { atomicWriteSync, ensureDir } from '../utils/atomic.js';
 import { acquireLock, releaseLock } from '../utils/lock.js';
 import { randomString } from '../utils/random.js';
 import { validateAgentName, validatePriority } from '../utils/validate.js';
-// added 2026-04-29 by collie via dane dispatch — RFC #15 Wave 1 events implementation
+import { redactSSN } from '../utils/ssn-redaction.js';
+// added 2026-04-29 via internal dispatch — RFC #15 Wave 1 events implementation
 import { logEvent } from './event.js';
 
 // ---------------------------------------------------------------------------
@@ -62,6 +63,13 @@ export function sendMessage(
   validateAgentName(to);
   validatePriority(priority);
 
+  // Layer-2 backstop at the PRIMITIVE: never STORE/SHARE an SSN in an inbox
+  // message, regardless of caller. Every inbox writer flows through here
+  // (CLI send-message, create-task auto-notify, notifyAgent, future callers),
+  // so scrubbing once at this chokepoint covers them all — per-call-site
+  // scrubbing left bypasses (create-task title/desc, urgent signals).
+  text = redactSSN(text);
+
   const pnum = PRIORITY_MAP[priority];
   const epochMs = Date.now();
   const rand = randomString(5);
@@ -86,7 +94,7 @@ export function sendMessage(
   ensureDir(inboxDir);
   atomicWriteSync(join(inboxDir, filename), JSON.stringify(message));
 
-  // added 2026-04-29 by collie via dane dispatch — RFC #15 Wave 1 events implementation
+  // added 2026-04-29 via internal dispatch — RFC #15 Wave 1 events implementation
   // Emit inbox_arrival event so hooks can subscribe to cross-agent message routing.
   // Best-effort: never throw out of the canonical send path.
   try {
@@ -104,7 +112,7 @@ export function sendMessage(
   return msgId;
 }
 
-// added 2026-04-29 by collie via dane dispatch — RFC #15 Wave 1 events implementation
+// added 2026-04-29 via internal dispatch — RFC #15 Wave 1 events implementation
 // Resolve org from BusPaths by walking analyticsDir which has shape `<root>/analytics/<org>`.
 // Falls back to env CTX_ORG, then '' as last resort. logEvent treats '' as a no-op org tag.
 function _orgFromPaths(paths: BusPaths): string {

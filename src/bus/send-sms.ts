@@ -2,6 +2,7 @@ import { homedir } from 'os';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import type { Approval, BusPaths } from '../types/index.js';
+import { redactSSN } from '../utils/ssn-redaction.js';
 
 const TELNYX_CREDS = join(homedir(), '.claude', 'credentials', 'telnyx.json');
 
@@ -74,6 +75,9 @@ export async function sendSms(
   text: string,
   opts: { sendReal?: boolean; approvedBy?: string } = {},
 ): Promise<SendSmsResult> {
+  // Scrub at the egress primitive: never SHARE an SSN over SMS, and never
+  // surface it in the dry-run preview either. Covers every caller of sendSms.
+  text = redactSSN(text);
   const { apiKey, fromNumber } = loadTelnyxCreds();
   const payload = { from: fromNumber, to, text };
 

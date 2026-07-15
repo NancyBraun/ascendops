@@ -3,6 +3,7 @@ import { join } from 'path';
 import type { AgentInfo, AgentConfig, BusPaths } from '../types/index.js';
 import { atomicWriteSync, ensureDir } from '../utils/atomic.js';
 import { sendMessage } from './message.js';
+import { redactSSN } from '../utils/ssn-redaction.js';
 
 /**
  * List all agents in the system.
@@ -301,6 +302,11 @@ export function notifyAgent(
   message: string,
   ctxRoot: string,
 ): void {
+  // Scrub the SSN once up front: it flows to TWO sinks — the .urgent-signal
+  // file written here AND the inbox message via sendMessage below. sendMessage
+  // scrubs its own copy, but the signal-file write is a separate sink.
+  message = redactSSN(message);
+
   // Write signal file to state dir
   const signalDir = join(ctxRoot, 'state', targetAgent);
   ensureDir(signalDir);

@@ -5,6 +5,7 @@ import { atomicWriteSync, ensureDir } from '../utils/atomic.js';
 import { parseEnvFile } from '../utils/env.js';
 import { randomString } from '../utils/random.js';
 import { validateApprovalCategory } from '../utils/validate.js';
+import { redactSSN } from '../utils/ssn-redaction.js';
 import { TelegramAPI } from '../telegram/api.js';
 import { sendMessage } from './message.js';
 import { postActivity } from './system.js';
@@ -187,6 +188,13 @@ export async function createApproval(
 ): Promise<string> {
   validateApprovalCategory(category);
 
+  // Scrub before persisting: the approval JSON is written to disk (a
+  // never-STORE surface) and a title/context can carry connector data (e.g. a
+  // draft with a tenant SSN). The Telegram fan-out is scrubbed at the
+  // TelegramAPI primitive; the at-rest JSON must be scrubbed here.
+  title = redactSSN(title);
+  if (context !== undefined) context = redactSSN(context);
+
   const epoch = Math.floor(Date.now() / 1000);
   const rand = randomString(5);
   const approvalId = `approval_${epoch}_${rand}`;
@@ -238,6 +246,10 @@ export function updateApproval(
   status: ApprovalStatus,
   note?: string,
 ): void {
+  // Scrub the resolution note before it is persisted into resolved_by (at-rest
+  // JSON) and before it goes into the decision notification below. Sibling of
+  // the createApproval title/context scrub.
+  if (note !== undefined) note = redactSSN(note);
   const pendingDir = join(paths.approvalDir, 'pending');
   const filePath = join(pendingDir, `${approvalId}.json`);
 

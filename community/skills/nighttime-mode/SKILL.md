@@ -105,7 +105,7 @@ cortextos bus send-message "$CTX_ORCHESTRATOR_AGENT" normal "Tool mastery comple
 See each agent's IDENTITY.md for their assigned tools. Summary:
 
 - **blue**: PM Nexus API, Property Meld Playwright, Twilio SMS, vendor DB (knowledge.md)
-- **collie**: cortextos bus CLI, gh CLI, upstream PR workflow, agentskills.io catalog
+- **an agent**: cortextos bus CLI, gh CLI, upstream PR workflow, agentskills.io catalog
 
 ---
 

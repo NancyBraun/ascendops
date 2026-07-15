@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "updated_at": "2026-06-03T17:52:14Z",
+  "updated_at": "2026-07-03T00:00:00Z",
   "items": [
     {
       "name": "agentic-crm-assistant",
@@ -8,7 +8,14 @@
       "author": "cortextos",
       "type": "agent",
       "version": "0.1.0",
-      "tags": ["personal-assistant", "crm", "calendar", "email", "meetings", "relationships"],
+      "tags": [
+        "personal-assistant",
+        "crm",
+        "calendar",
+        "email",
+        "meetings",
+        "relationships"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/agents/agentic-crm-assistant",
@@ -20,7 +27,12 @@
       "author": "cortextos",
       "type": "agent",
       "version": "1.0.0",
-      "tags": ["orchestrator", "management", "reviews", "goals"],
+      "tags": [
+        "orchestrator",
+        "management",
+        "reviews",
+        "goals"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/agents/orchestrator",
@@ -32,7 +44,12 @@
       "author": "cortextos",
       "type": "agent",
       "version": "1.0.0",
-      "tags": ["analyst", "metrics", "research", "health"],
+      "tags": [
+        "analyst",
+        "metrics",
+        "research",
+        "health"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/agents/analyst",
@@ -44,7 +61,11 @@
       "author": "cortextos",
       "type": "agent",
       "version": "1.0.0",
-      "tags": ["agent", "worker", "general-purpose"],
+      "tags": [
+        "agent",
+        "worker",
+        "general-purpose"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/agents/agent",
@@ -56,7 +77,12 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["tasks", "workflow", "kpi", "visibility"],
+      "tags": [
+        "tasks",
+        "workflow",
+        "kpi",
+        "visibility"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/tasks",
@@ -68,7 +94,12 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["telegram", "messaging", "comms", "inbox"],
+      "tags": [
+        "telegram",
+        "messaging",
+        "comms",
+        "inbox"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/comms",
@@ -80,7 +111,12 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["research", "experiments", "theta-wave", "optimization"],
+      "tags": [
+        "research",
+        "experiments",
+        "theta-wave",
+        "optimization"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/autoresearch",
@@ -92,7 +128,13 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["m2c1", "builds", "worker", "autonomous", "software"],
+      "tags": [
+        "m2c1",
+        "builds",
+        "worker",
+        "autonomous",
+        "software"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/m2c1-worker",
@@ -104,7 +146,12 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["workers", "parallel", "spawn", "isolation"],
+      "tags": [
+        "workers",
+        "parallel",
+        "spawn",
+        "isolation"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/worker-agents",
@@ -116,7 +163,12 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["rag", "knowledge", "search", "memory"],
+      "tags": [
+        "rag",
+        "knowledge",
+        "search",
+        "memory"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/knowledge-base",
@@ -128,7 +180,12 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["approvals", "safety", "human-in-loop", "guardrails"],
+      "tags": [
+        "approvals",
+        "safety",
+        "human-in-loop",
+        "guardrails"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/approvals",
@@ -140,7 +197,12 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["memory", "continuity", "session", "persistence"],
+      "tags": [
+        "memory",
+        "continuity",
+        "session",
+        "persistence"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/memory",
@@ -152,7 +214,12 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["cron", "scheduling", "recurring", "automation"],
+      "tags": [
+        "cron",
+        "scheduling",
+        "recurring",
+        "automation"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/cron-management",
@@ -164,7 +231,12 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["heartbeat", "health", "monitoring", "dashboard"],
+      "tags": [
+        "heartbeat",
+        "health",
+        "monitoring",
+        "dashboard"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/heartbeat",
@@ -176,7 +248,12 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["human-tasks", "blockers", "escalation", "routing"],
+      "tags": [
+        "human-tasks",
+        "blockers",
+        "escalation",
+        "routing"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/human-tasks",
@@ -188,7 +265,12 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["agents", "lifecycle", "management", "crash-recovery"],
+      "tags": [
+        "agents",
+        "lifecycle",
+        "management",
+        "crash-recovery"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/agent-management",
@@ -200,7 +282,12 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["activity", "broadcast", "org", "visibility"],
+      "tags": [
+        "activity",
+        "broadcast",
+        "org",
+        "visibility"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/activity-channel",
@@ -212,7 +299,12 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["events", "logging", "activity", "dashboard"],
+      "tags": [
+        "events",
+        "logging",
+        "activity",
+        "dashboard"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/event-logging",
@@ -224,7 +316,12 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["diagnostics", "debug", "troubleshooting", "health"],
+      "tags": [
+        "diagnostics",
+        "debug",
+        "troubleshooting",
+        "health"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/system-diagnostics",
@@ -236,7 +333,12 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["onboarding", "setup", "first-boot", "configuration"],
+      "tags": [
+        "onboarding",
+        "setup",
+        "first-boot",
+        "configuration"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/onboarding",
@@ -248,7 +350,12 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["morning", "briefing", "review", "daily"],
+      "tags": [
+        "morning",
+        "briefing",
+        "review",
+        "daily"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/morning-review",
@@ -260,7 +367,12 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["evening", "review", "daily", "wrap-up"],
+      "tags": [
+        "evening",
+        "review",
+        "daily",
+        "wrap-up"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/evening-review",
@@ -272,7 +384,12 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["weekly", "review", "performance", "metrics"],
+      "tags": [
+        "weekly",
+        "review",
+        "performance",
+        "metrics"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/weekly-review",
@@ -284,7 +401,12 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["theta-wave", "research", "overnight", "autonomous"],
+      "tags": [
+        "theta-wave",
+        "research",
+        "overnight",
+        "autonomous"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/theta-wave",
@@ -296,7 +418,12 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["goals", "strategy", "tracking", "management"],
+      "tags": [
+        "goals",
+        "strategy",
+        "tracking",
+        "management"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/goal-management",
@@ -308,7 +435,12 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["git", "version-control", "pr", "workflow"],
+      "tags": [
+        "git",
+        "version-control",
+        "pr",
+        "workflow"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/local-version-control",
@@ -320,7 +452,12 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["nighttime", "autonomous", "quiet", "overnight"],
+      "tags": [
+        "nighttime",
+        "autonomous",
+        "quiet",
+        "overnight"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/nighttime-mode",
@@ -332,7 +469,12 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["pm", "propertymeld", "meld", "triage"],
+      "tags": [
+        "pm",
+        "propertymeld",
+        "meld",
+        "triage"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/pm/pm-check-meld",
@@ -344,22 +486,15 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["pm", "propertymeld", "cli", "work-orders"],
+      "tags": [
+        "pm",
+        "propertymeld",
+        "cli",
+        "work-orders"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/pm/pm-cli-harness",
-      "submitted_at": "2026-06-03T17:52:14Z"
-    },
-    {
-      "name": "pm-dane-iq-playbook",
-      "description": "your orchestrator IQ operational reference for the PM agent. Triage decision tree, vendor scoring, escalation thresholds, habitability rules — distilled from the TriageSupervisor, VendorSelectionSupervisor, and their worker agents.",
-      "author": "cortextos",
-      "type": "skill",
-      "version": "1.0.0",
-      "tags": ["pm", "propertymeld", "triage", "vendor", "escalation"],
-      "review_status": "approved",
-      "dependencies": [],
-      "install_path": "community/skills/pm/pm-dane-iq-playbook",
       "submitted_at": "2026-06-03T17:52:14Z"
     },
     {
@@ -368,7 +503,12 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["pm", "propertymeld", "inspections", "turnover"],
+      "tags": [
+        "pm",
+        "propertymeld",
+        "inspections",
+        "turnover"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/pm/pm-inspections",
@@ -380,7 +520,12 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["pm", "propertymeld", "triage", "routing"],
+      "tags": [
+        "pm",
+        "propertymeld",
+        "triage",
+        "routing"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/pm/pm-meld-triage",
@@ -392,7 +537,13 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["pm", "propertymeld", "triage", "review", "scan"],
+      "tags": [
+        "pm",
+        "propertymeld",
+        "triage",
+        "review",
+        "scan"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/pm/pm-morning-scan",
@@ -400,11 +551,16 @@
     },
     {
       "name": "pm-propertymeld-platform",
-      "description": "Property Meld platform deep reference for the PM agent. Full feature coverage: Projects, make-ready/turnover lifecycle, workflow automation, three-way chat, vendor portal, integrations, KPIs, MAX On-Call, resident portal, scheduling.",
+      "description": "Property Meld platform deep reference for Blue. Full feature coverage: Projects, make-ready/turnover lifecycle, workflow automation, three-way chat, vendor portal, integrations, KPIs, MAX On-Call, resident portal, scheduling.",
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["pm", "propertymeld", "platform", "reference"],
+      "tags": [
+        "pm",
+        "propertymeld",
+        "platform",
+        "reference"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/pm/pm-propertymeld-platform",
@@ -416,7 +572,13 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["pm", "propertymeld", "auth", "session", "recapture"],
+      "tags": [
+        "pm",
+        "propertymeld",
+        "auth",
+        "session",
+        "recapture"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/pm/pm-session-recapture",
@@ -428,7 +590,13 @@
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["pm", "propertymeld", "planning", "decompose", "workflow"],
+      "tags": [
+        "pm",
+        "propertymeld",
+        "planning",
+        "decompose",
+        "workflow"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/pm/planning-decompose",
@@ -436,11 +604,17 @@
     },
     {
       "name": "self-evaluation-triage",
-      "description": "After every meld decision, capture what was decided and why (trajectory). Weekly: scan all trajectories for override patterns, surface refinement candidates to your orchestrator.",
+      "description": "After every meld decision, capture what was decided and why (trajectory). Weekly: scan all trajectories for override patterns, surface refinement candidates to an agent.",
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["pm", "propertymeld", "triage", "evaluation", "review"],
+      "tags": [
+        "pm",
+        "propertymeld",
+        "triage",
+        "evaluation",
+        "review"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/pm/self-evaluation-triage",
@@ -448,11 +622,16 @@
     },
     {
       "name": "skill-auto-discovery",
-      "description": "After completing a complex task, check whether the sequence of steps used represents a recurring pattern worth codifying into a skill. Logs skill candidates to the bus for weekly review by your orchestrator.",
+      "description": "After completing a complex task, check whether the sequence of steps used represents a recurring pattern worth codifying into a skill. Logs skill candidates to the bus for weekly review by an agent.",
       "author": "cortextos",
       "type": "skill",
       "version": "1.0.0",
-      "tags": ["general", "meta", "workflow", "discovery"],
+      "tags": [
+        "general",
+        "meta",
+        "workflow",
+        "discovery"
+      ],
       "review_status": "approved",
       "dependencies": [],
       "install_path": "community/skills/pm/skill-auto-discovery",
@@ -460,13 +639,18 @@
     },
     {
       "name": "business-development",
-      "description": "Business development agent — outbound prospecting, lead qualification, and pipeline management using the NEPQ sales methodology",
+      "description": "Business development agent — outbound prospecting, lead qualification, and pipeline management using a structured sales methodology",
       "author": "ascendops",
       "type": "agent",
       "version": "1.0.0",
-      "tags": ["business-development", "sales", "prospecting", "nepq", "pipeline"],
+      "tags": [
+        "business-development",
+        "sales",
+        "prospecting",
+        "pipeline"
+      ],
       "review_status": "community",
-      "dependencies": ["nepq"],
+      "dependencies": [],
       "install_path": "community/agents/business-development",
       "submitted_at": "2026-06-03T00:00:00Z"
     },
@@ -476,23 +660,90 @@
       "author": "ascendops",
       "type": "agent",
       "version": "1.0.0",
-      "tags": ["leasing", "coordinator", "tenants", "showings", "applications"],
+      "tags": [
+        "leasing",
+        "coordinator",
+        "tenants",
+        "showings",
+        "applications"
+      ],
       "review_status": "community",
       "dependencies": [],
       "install_path": "community/agents/leasing-coordinator",
       "submitted_at": "2026-06-03T00:00:00Z"
     },
     {
-      "name": "nepq",
-      "description": "NEPQ sales methodology bundle — framework, cold outreach, discovery notes, follow-up cadence, objection handling, and the verbatim Black Book question bank (6 sub-skills)",
+      "name": "renewals-coordinator",
+      "description": "Renewals coordinator agent for renewal risk scoring, rent recommendation, and renewal pipeline QA",
       "author": "ascendops",
-      "type": "skill",
+      "type": "agent",
       "version": "1.0.0",
-      "tags": ["nepq", "sales", "prospecting", "objection-handling", "question-bank"],
+      "tags": [
+        "renewals",
+        "coordinator",
+        "rent",
+        "scoring",
+        "retention"
+      ],
       "review_status": "community",
       "dependencies": [],
-      "install_path": "community/skills/nepq",
-      "submitted_at": "2026-06-03T00:00:00Z"
+      "install_path": "community/agents/renewals-coordinator",
+      "submitted_at": "2026-07-01T00:00:00Z"
+    },
+    {
+      "name": "maintenance-coordinator",
+      "description": "Maintenance coordinator agent for repair work orders, vendor dispatch, and maintenance scheduling",
+      "author": "ascendops",
+      "type": "agent",
+      "version": "1.0.0",
+      "tags": [
+        "maintenance",
+        "coordinator",
+        "repairs",
+        "work-orders",
+        "vendors"
+      ],
+      "review_status": "community",
+      "dependencies": [],
+      "install_path": "community/agents/maintenance-coordinator",
+      "submitted_at": "2026-07-01T00:00:00Z"
+    },
+    {
+      "name": "turnover-coordinator",
+      "description": "Turnover coordinator agent — owns the make-ready pipeline from move-out possession through rent-ready certification: inspection intake, scope + punch list, multi-trade coordination, QC, and leasing handoff",
+      "author": "ascendops",
+      "type": "agent",
+      "version": "1.0.0",
+      "tags": [
+        "turnover",
+        "coordinator",
+        "make-ready",
+        "vacancy",
+        "rent-ready",
+        "property-management"
+      ],
+      "review_status": "community",
+      "dependencies": [],
+      "install_path": "community/agents/turnover-coordinator",
+      "submitted_at": "2026-07-01T00:00:00Z"
+    },
+    {
+      "name": "voice-agent-factory",
+      "description": "Turn any cortextOS agent into a live ElevenLabs voice agent: mine its real capabilities into a tool catalog, generate a policy-gated gateway dynamically (no pre-built scripts), test on probe-shaped fixtures, provision with tier fallback, verify with real conversations",
+      "author": "cortextos",
+      "type": "skill",
+      "version": "1.0.0",
+      "tags": [
+        "voice",
+        "elevenlabs",
+        "conversational-ai",
+        "gateway",
+        "tools"
+      ],
+      "review_status": "pending",
+      "dependencies": [],
+      "install_path": "community/skills/voice-agent-factory",
+      "submitted_at": "2026-06-06T09:30:00Z"
     }
   ]
 }

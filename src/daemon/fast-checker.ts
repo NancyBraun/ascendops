@@ -18,9 +18,10 @@ import { KEYS } from '../pty/inject.js';
 import { stripControlChars, sanitizeForPtyInjection, wrapFenceSafe, validateOrgName } from '../utils/validate.js';
 import { resolve as pathResolve, sep } from 'path';
 import { atomicWriteSync } from '../utils/atomic.js';
-// added 2026-04-29 by collie via dane dispatch — RFC #15 Day-1 dispatcher integration; Piece 3 (handler-type wiring) deferred to Day-2
+// added 2026-04-29 via internal dispatch — RFC #15 Day-1 dispatcher integration; Piece 3 (handler-type wiring) deferred to Day-2
 import { loadHookRegistry, matchHooks, dispatchHook, type HookRegistry } from '../bus/hooks.js';
 import { registerBuiltInHandlers } from '../bus/hook-handlers/index.js';
+import { agentHoldsContextHandoffLease, releaseContextHandoffLease, requestContextHandoffLease } from './context-handoff-lease.js';
 
 type LogFn = (msg: string) => void;
 
@@ -40,7 +41,7 @@ type AskState = {
 
 type ContextStatus = {
   written_at: string;
-  used_percentage: number;
+  used_percentage: number | null;
   exceeds_200k_tokens: boolean;
   session_id?: string;
 };
@@ -49,6 +50,19 @@ type WatchdogRestartMarker = {
   restartedAt: number;
   stdoutHighWater: number;
 };
+
+/**
+ * Post-boot grace window (ms) during which soft context-handoff actions are
+ * suppressed. Runtime-aware: codex-app-server and opencode briefly report
+ * inflated prior prompt-cache context tokens, and that spurious spike can land
+ * ~6-8min after a fresh boot (observed double-handoffs ~6-8min apart on a codex
+ * agent), OUTSIDE a short grace. Those runtimes get a 10min window; all others
+ * keep the original 2min.
+ */
+export function handoffGraceMs(runtime: string | undefined): number {
+  if (runtime === 'codex-app-server' || runtime === 'opencode') return 600_000;
+  return 120_000;
+}
 
 /**
  * Fast message checker for a single agent.
@@ -156,12 +170,16 @@ export class FastChecker {
   private ctxHandoffFiredAt: number = 0;    // fires once per session (0 = not yet)
   private ctxHandoffDeadlineAt: number = 0; // timestamp after which force-restart fires
   private ctxLastSessionId: string | null = null; // detects new session → clears stale deadline
+  private ctxSessionStartedAt: number = 0; // when current session_id was first observed — handoff grace window anchor
+  private ctxHandoffLeaseId: string | null = null;
+  private ctxHandoffQueuedLogAt: number = 0;
   private ctxCircuitRestarts: number[] = []; // timestamps of recent context-triggered restarts
+  private ctxHandoffFires: number[] = [];    // timestamps of recent Tier-2 handoff fires (cooperative-restart loop backstop)
   private ctxCircuitBrokenAt: number | null = null; // when circuit tripped (null = healthy)
   // Persisted to disk so --continue restarts don't reset the circuit breaker
   private ctxCircuitFile: string = '';
 
-  // added 2026-04-29 by collie via dane dispatch — RFC #15 Day-1 dispatcher integration; Piece 3 (handler-type wiring) deferred to Day-2
+  // added 2026-04-29 via internal dispatch — RFC #15 Day-1 dispatcher integration; Piece 3 (handler-type wiring) deferred to Day-2
   // Hook dispatcher state. Inert until Day-1 wiring runs in start().
   // Per RFC #15 §9 fail-open: if org cannot be resolved (no CTX_ORG env, no
   // registry file), the dispatcher stays disabled and never fires hooks.
@@ -244,12 +262,23 @@ export class FastChecker {
       this.logCriticalValidationError(filePath, 'invalid written_at: expected string');
       return null;
     }
-    if (typeof raw.used_percentage !== 'number') {
-      this.logCriticalValidationError(filePath, 'invalid used_percentage: expected number');
-      return null;
-    }
     if (typeof raw.exceeds_200k_tokens !== 'boolean') {
       this.logCriticalValidationError(filePath, 'invalid exceeds_200k_tokens: expected boolean');
+      return null;
+    }
+    if (!('used_percentage' in raw)) {
+      // Absent used_percentage is a legitimate skip (status not yet computed /
+      // partial write), not a corruption. Skip cleanly without the CRITICAL log;
+      // a present-but-wrong-type value below still errors.
+      return null;
+    }
+    if (raw.used_percentage === null) {
+      // Null percentage is only actionable when the bridge also reports a hard
+      // 200k overflow; otherwise it is a clean partial-write/status-not-ready skip.
+      return raw.exceeds_200k_tokens ? raw as ContextStatus : null;
+    }
+    if (typeof raw.used_percentage !== 'number') {
+      this.logCriticalValidationError(filePath, 'invalid used_percentage: expected number');
       return null;
     }
     if ('session_id' in raw && typeof raw.session_id !== 'string') {
@@ -367,7 +396,19 @@ export class FastChecker {
     // Idle-session heartbeat watchdog: fires every 50 min regardless of REPL state
     const HEARTBEAT_INTERVAL_MS = 50 * 60 * 1000;
     const agentName = this.agent.name;
+    // Fire-time onboarding gate. An agent that has not finished onboarding must NOT
+    // mint a watchdog heartbeat: the daemon's retro-write in agent-process.ts
+    // buildStartupPrompt now fires ONLY when IDENTITY.md + MEMORY.md contain
+    // non-template bootstrap content (our 2d129a68; upstream #667 removed the
+    // heartbeat-only arm). Gating heartbeats until .onboarded is written prevents a
+    // partially-onboarded agent from accumulating live-watchdog pings and ensures
+    // the role-cron registration on the next restart is not skipped prematurely.
+    // The check is INSIDE the callback so it re-evaluates every tick and auto-resumes
+    // the instant onboarding writes .onboarded (no restart). Path matches
+    // agent-process.ts (stateDir/.onboarded).
+    const onboardedMarkerPath = join(this.paths.stateDir, '.onboarded');
     this.heartbeatTimer = setInterval(() => {
+      if (!existsSync(onboardedMarkerPath)) return;
       const ts = new Date().toISOString();
       // Invoke the built CLI via node directly rather than the bare `cortextos`
       // command: on Windows the npm global is a `cortextos.cmd` shim that
@@ -476,7 +517,7 @@ export class FastChecker {
       }, this.GMAIL_TIMER_TICK_MS);
     }
 
-    // added 2026-04-29 by collie via dane dispatch — RFC #15 Day-1 dispatcher integration; Piece 3 (handler-type wiring) deferred to Day-2
+    // added 2026-04-29 via internal dispatch — RFC #15 Day-1 dispatcher integration; Piece 3 (handler-type wiring) deferred to Day-2
     this.startHookDispatcher();
 
     while (this.running) {
@@ -525,7 +566,7 @@ export class FastChecker {
       clearInterval(this.gmailWatchTimer);
       this.gmailWatchTimer = null;
     }
-    // added 2026-04-29 by collie via dane dispatch — RFC #15 Day-1 dispatcher integration; Piece 3 (handler-type wiring) deferred to Day-2
+    // added 2026-04-29 via internal dispatch — RFC #15 Day-1 dispatcher integration; Piece 3 (handler-type wiring) deferred to Day-2
     if (this.hookRegistryWatcher !== null) {
       try { this.hookRegistryWatcher.close(); } catch { /* best-effort */ }
       this.hookRegistryWatcher = null;
@@ -537,11 +578,11 @@ export class FastChecker {
   }
 
   // ── RFC #15 Day-1 hook dispatcher ─────────────────────────────────────────
-  // added 2026-04-29 by collie via dane dispatch — RFC #15 Day-1 dispatcher integration; Piece 3 (handler-type wiring) deferred to Day-2
+  // added 2026-04-29 via internal dispatch — RFC #15 Day-1 dispatcher integration; Piece 3 (handler-type wiring) deferred to Day-2
   // Piece 1: load + watch hooks.json. Piece 2: tail today's event JSONL and
   // call matchHooks → dispatchHook (still stub). Piece 3 (per-handler-type
   // wiring with bash/send_message/log_event/webhook) is Day-2 work — see
-  // TODOs below and orgs/ascendops/docs/rfc-bus-hooks-dispatcher-design.md §6.
+  // TODOs below and your org internal docs §6.
   private startHookDispatcher(): void {
     const org = process.env.CTX_ORG;
     if (!org) {
@@ -884,24 +925,82 @@ export class FastChecker {
     if (tail && this.ctxThresholdPct > 0) {
       // Strip ANSI escape codes before applying the pattern
       const stripped = tail.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
-      // F7: anchor on the status-line "context" suffix — the real line is
-      // "[<Model>] <branch> · NN% context used", so a percent immediately
-      // followed by "context" on the same line is the reliable signal. This is
+      // F8: anchor on the FULL status-line shape — the real line is
+      // "[<Model>] <branch> · NN% context used". We require the percent, then
+      // only same-line whitespace, then "context", then "used". This is
       // model-agnostic (no Sonnet|Opus|Haiku pinning, which silently disabled
-      // Signal 3 for other model families) AND excludes the false positives the
-      // old badge-prefix shape let through — uppercase log tags like
-      // [INFO] 85%, [WARN] 90%, [ERROR] 95%, [BUILD] 88% have no "context"
-      // suffix so they no longer trigger a restart.
-      //   - percent and "context" must sit on the SAME line (the status line is
-      //     a single line)
-      //   - up to 15 chars between them absorbs the " " / " · " separators
+      // Signal 3 for other model families) and kills the prose false positives
+      // the previous /(\d{1,3})%[^\n]{0,15}context/ shape let through:
+      //   - "85% context switches"          (a literal FP seen in an agent stdout)
+      //   - "reduced X by 85% in the context of …"  (ordinary prose)
+      //   - "hit the 85% proactive-context-reset"   (agent narrating the reset)
+      // Those matched because any text (incl. " in the ", "-") sat between the
+      // percent and "context". Requiring [^\S\n]{0,3} + "used" leaves only the
+      // genuine status line.
+      // Two deliberate constraints (Codex P2s on ae347cf):
+      //   - "used" ONLY — NOT "left"/"remaining". The captured percent is fed
+      //     straight into a USED-percent threshold (pct >= ctxThresholdPct
+      //     below). A "left"/"remaining" line reports the inverse (30% left =
+      //     70% used), so matching it would compare 30 >= 70 and silently miss
+      //     a near-full session. If a future CLI build emits only "left"/
+      //     "remaining", add a (100 - pct) conversion before thresholding —
+      //     do NOT just widen the alternation.
+      //   - [^\S\n] (same-line whitespace), NOT \s. In JS \s matches newlines,
+      //     so \s{0,3}/\s+ would let the match span adjacent stdout lines
+      //     (e.g. a line ending "85%" followed by a line containing
+      //     "context used"). [^\S\n] pins percent + "context" + "used" to ONE
+      //     status line. Proof: "85%\ncontext used" must NOT match.
+      //   - BOTH gaps are zero-or-more ({0,3} and *), NOT one-or-more. The real
+      //     PTY status line uses ANSI cursor-position escapes (ESC[NNNG) as the
+      //     column separators between badge/percent/"context"/"used", and we
+      //     strip ANSI FIRST (line 883). On the live wire those escapes are the
+      //     ONLY separators, so after stripping the line collapses to
+      //     "97%contextused" with ZERO whitespace. A second gap of [^\S\n]+
+      //     (one-or-more) required >=1 space and matched NULL on the real
+      //     stripped line, silently disabling Signal 3 (agents wedged at full
+      //     context) — worse than the prose FP it killed. [^\S\n]* allows the
+      //     collapsed shape while staying same-line. Proof: "97%contextused"
+      //     must return 97.
       //   - percent capped at 3 digits and sanity-checked <= 100 below
-      // Known acceptable residual: a literal "NN% context …" in prose (e.g.
-      // "85% context switches") is rare in agent stdout — not chased.
-      const pctMatch = stripped.match(/(\d{1,3})%[^\n]{0,15}context/);
+      // F9 (Codex P2 on c34f7b7): anchor the match to a leading STATUS MARKER.
+      // The F8 shape above was still UNANCHORED over the whole stripped tail, so
+      // a bare literal "97%contextused" / "97% context used" printed ANYWHERE
+      // (an agent echoing source, a diff, a test fixture, a bus message) matched
+      // as a genuine status line and injected a false restart at the 70%
+      // default. We now require a leading marker that the live status line
+      // always carries immediately before the percent but bare-literal prose
+      // never does: a progress-bar block (█ U+2588 / ░ U+2591) or a status dot
+      // (🔴 U+1F534 / 🟡 U+1F7E1 / 🟢 U+1F7E2). Empirically (real an agent/an agent/
+      // an agent stdout corpora) this kills the dominant remaining FP class
+      // (markerless quotes+prose: ~72/86 on an agent, ~54/72 on an agent) while
+      // losing ZERO genuine live renders. The /u flag is REQUIRED: the status
+      // dots are astral (>U+FFFF); without /u, JS would match a lone surrogate
+      // half of a dot = semantically broken. We use \u escapes (not literal
+      // emoji) in this source so this very line carries no matchable marker.
+      // ACCEPTED RESIDUAL (do NOT claim 0-FP): a FAITHFUL full-marker quote that
+      // reproduces "<marker>NN% context used" verbatim (e.g. this feature being
+      // debugged in a bus message that copies a real render) still matches.
+      // Near-zero in steady state, elevated only while this code is itself under
+      // discussion. A quotation-proof FUTURE hardening is the ANSI cursor
+      // envelope (ESC[NNNG between every token, which the renderer emits but a
+      // quote cannot carry) — NOT used now because production strips ANSI first
+      // (line 883) and a space-rendering terminal would emit literal spaces,
+      // making an envelope-only matcher false-NEGATIVE = Signal 3 silently
+      // disabled = the worse failure.
+      // RESIDUAL RISK: if a future Claude Code build rewords the status-line
+      // suffix away from "used" OR drops the bar/dot marker rendering, Signal 3
+      // silently stops firing — re-check this pattern against the live status
+      // line on CLI upgrades. (Signal 1 survey-prompt + the fallback hard
+      // restart are independent backstops.)
+      const pctMatch = stripped.match(/[█░\u{1F534}\u{1F7E1}\u{1F7E2}][^\S\n]*(\d{1,3})%[^\S\n]{0,3}context[^\S\n]*used/u);
       if (pctMatch) {
         const pct = parseInt(pctMatch[1], 10);
         if (pct >= this.ctxThresholdPct && pct <= 100) {
+          // §5d: A context handoff prompt was already injected this session — skip
+          // Signal-3 injection to avoid two competing restart requests in the same
+          // dying session. Tier-3's 5-min force-restart deadline preempts Signal 3's
+          // 15-min fallback for wired agents, so no restart protection is lost here.
+          if (this.ctxHandoffFiredAt > 0) return;
           if (this.ctxThresholdTriggeredAt > 0 &&
               now - this.ctxThresholdTriggeredAt > this.CTX_THRESHOLD_FALLBACK_MS) {
             // Agent ignored the injection for 15 min — fallback hard restart
@@ -1453,10 +1552,12 @@ Reply using: cortextos bus send-message ${from} normal '<your reply>' ${msg.id}
     lastSentText?: string,
     recentHistory?: string,
   ): string {
-    let replyCx = '';
-    if (replyToText) {
-      replyCx = `[Replying to: "${sanitizeForPtyInjection(replyToText.slice(0, 500))}"]\n`;
-    }
+    // Every externally-influenced field below is untrusted (the sender controls
+    // text/display-name; reply-context, last-sent and recent-history are built
+    // from prior external messages). Sanitize each so none can escape the fence
+    // or forge a containment header. Unfenced context fields (reply/history) are
+    // the weakest surface — they sit raw in [Replying to: "..."] / [Recent ...].
+    const replyCx = FastChecker.formatReplyContext(replyToText);
 
     let lastSentCtx = '';
     if (lastSentText) {
@@ -1522,9 +1623,10 @@ ${lastSentCtx}Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     chatId: string | number,
     caption: string,
     imagePath: string,
+    replyToText?: string,
   ): string {
     return `=== TELEGRAM PHOTO from ${sanitizeForPtyInjection(from)} (chat_id:${chatId}) ===
-caption:
+${FastChecker.formatReplyContext(replyToText)}caption:
 ${wrapFenceSafe(caption)}
 local_file: ${imagePath}
 Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
@@ -1542,9 +1644,10 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     caption: string,
     filePath: string,
     fileName: string,
+    replyToText?: string,
   ): string {
     return `=== TELEGRAM DOCUMENT from ${sanitizeForPtyInjection(from)} (chat_id:${chatId}) ===
-caption:
+${FastChecker.formatReplyContext(replyToText)}caption:
 ${wrapFenceSafe(caption)}
 local_file: ${filePath}
 file_name: ${sanitizeForPtyInjection(fileName)}
@@ -1568,13 +1671,14 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     filePath: string,
     duration: number | undefined,
     transcript?: string,
+    replyToText?: string,
   ): string {
     const dur = duration !== undefined ? duration : 'unknown';
     const transcriptBlock = transcript && transcript.trim()
       ? `transcript:\n${wrapFenceSafe(transcript.trim())}\n`
       : '';
     return `=== TELEGRAM VOICE from ${sanitizeForPtyInjection(from)} (chat_id:${chatId}) ===
-duration: ${dur}s
+${FastChecker.formatReplyContext(replyToText)}duration: ${dur}s
 local_file: ${filePath}
 ${transcriptBlock}Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
 
@@ -1592,10 +1696,11 @@ ${transcriptBlock}Reply using: cortextos bus send-telegram ${chatId} '<your repl
     filePath: string,
     fileName: string,
     duration: number | undefined,
+    replyToText?: string,
   ): string {
     const dur = duration !== undefined ? duration : 'unknown';
     return `=== TELEGRAM VIDEO from ${sanitizeForPtyInjection(from)} (chat_id:${chatId}) ===
-caption:
+${FastChecker.formatReplyContext(replyToText)}caption:
 ${wrapFenceSafe(caption)}
 duration: ${dur}s
 local_file: ${filePath}
@@ -1603,6 +1708,12 @@ file_name: ${sanitizeForPtyInjection(fileName)}
 Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
 
 `;
+  }
+
+  private static formatReplyContext(replyToText?: string): string {
+    return replyToText
+      ? `[Replying to: "${sanitizeForPtyInjection(replyToText.slice(0, 500))}"]\n`
+      : '';
   }
 
   /**
@@ -1974,7 +2085,28 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       return;
     }
 
-    this.log(`Unhandled callback data: ${data}`);
+    // Inject unhandled callbacks as a Telegram message so the agent can process custom button flows.
+    // senderName (Telegram first_name) and callback_data are untrusted: sanitize both against
+    // PTY-injection before interpolating, matching the text path (sanitizeForPtyInjection at the
+    // `=== TELEGRAM from [USER: ...]` header). This block predates #592; #592's hardening was never
+    // retrofitted here, leaving forged `=== AGENT MESSAGE`/fence-breakout headers un-neutralized.
+    if (chatId && this.agent) {
+      const senderName = sanitizeForPtyInjection(query.from?.first_name || 'User');
+      const safeData = sanitizeForPtyInjection(data);
+      const msg = [
+        `=== TELEGRAM from [USER: ${senderName}] (chat_id:${chatId}) ===`,
+        `callback_data: ${safeData}`,
+        `message_id: ${messageId}`,
+        `Reply using: cortextos bus send-telegram ${chatId} '<your reply>'`,
+      ].join('\n');
+      const injected = this.agent.injectMessage(msg);
+      if (injected && this.telegramApi) {
+        try { await this.telegramApi.answerCallbackQuery(callbackQueryId, 'Got it'); } catch { /* ignore */ }
+      }
+      this.log(`Injected unhandled callback to agent: ${data.slice(0, 60)}`);
+    } else {
+      this.log(`Unhandled callback data (no agent/chatId): ${data}`);
+    }
   }
 
   /**
@@ -2065,9 +2197,11 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
         this.log(`Urgent signal detected: ${content}`);
         unlinkSync(urgentPath);
 
-        // Inject the urgent message
+        // Inject the urgent message — fence the body unescapably (#592 follow-up)
+        // so a signal payload carrying its own fence can't break out and forge
+        // daemon containment headers.
         if (content) {
-          const urgentMsg = `=== URGENT SIGNAL ===\n\`\`\`\n${content}\n\`\`\`\n\n`;
+          const urgentMsg = `=== URGENT SIGNAL ===\n${wrapFenceSafe(content)}\n\n`;
           this.agent.injectMessage(urgentMsg);
         }
       } catch (err) {
@@ -2095,8 +2229,12 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     } catch { /* keep stale values */ }
     const config = this.agent.getConfig();
     return {
-      warn: config.ctx_warning_threshold ?? 70,
-      handoff: config.ctx_handoff_threshold ?? 80,
+      // Context-handoff is ON by default for every runtime/agent: an unset
+      // threshold falls back to 30% warning / 60% handoff (a percentage of the
+      // ACTIVE model's context window, so it adapts to window size). An explicit
+      // ctx_handoff_threshold <= 0 is the deliberate opt-out (see checkContextStatus).
+      warn: config.ctx_warning_threshold ?? 30,
+      handoff: config.ctx_handoff_threshold ?? 60,
     };
   }
 
@@ -2113,6 +2251,7 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       if (now - this.ctxCircuitBrokenAt >= 30 * 60_000) {
         this.ctxCircuitBrokenAt = null;
         this.ctxCircuitRestarts = [];
+        this.ctxHandoffFires = [];
         this.saveCtxCircuit();
         this.log('Context circuit breaker reset after 30min pause');
       } else {
@@ -2140,6 +2279,17 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       // 5-min deadline timer would otherwise fire on the fresh low-context session.
       const incomingSessionId = data.session_id ?? null;
       if (incomingSessionId && incomingSessionId !== this.ctxLastSessionId) {
+        // Release any context-handoff lease held by this agent on a fresh session.
+        // This MUST be unconditional — released by agent name, not gated on
+        // ctxLastSessionId or the in-memory ctxHandoffLeaseId. A handoff restart can
+        // reset this monitor's per-agent state (both fields back to null), so gating
+        // release on either leaks the lease until its 10-min TTL and starves the fleet
+        // handoff queue: completed handoffs never free their slot, and queued agents
+        // above threshold wait up to a full TTL for a slot. A fresh session never needs
+        // a lease acquired by a prior session of the same agent; release-by-name is a
+        // no-op when none is held and also clears any stale queue entry.
+        releaseContextHandoffLease(this.paths.ctxRoot, this.agent.name);
+        this.ctxHandoffLeaseId = null;
         if (this.ctxLastSessionId !== null) {
           this.ctxHandoffFiredAt = 0;
           this.ctxHandoffDeadlineAt = 0;
@@ -2147,24 +2297,82 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
           this.log(`New session detected (${incomingSessionId.slice(0, 8)}…) — per-session ctx state reset`);
         }
         this.ctxLastSessionId = incomingSessionId;
+        // Anchor the handoff grace window. A freshly-started session begins at low
+        // context, so context-handoff actions are suppressed for HANDOFF_GRACE_MS to
+        // avoid acting on a transient/stale high reading (observed on fresh codex
+        // app-server threads that briefly report prior prompt-cache tokens) that
+        // would otherwise fire an immediate handoff → restart → fresh-session loop.
+        this.ctxSessionStartedAt = now;
       }
     } catch { return; }
 
-    // Check PTY output for hard API overflow errors (always act regardless of threshold config)
+    // Check PTY output for hard API overflow errors (always act regardless of threshold config).
+    // Guard: only treat the banner phrase as a *live* overflow when context usage actually
+    // corroborates it (exceeds 200k, or pct genuinely high). The same phrase appears as benign
+    // text in memory files, source, and chat that *document* this mechanism — without this guard
+    // a fresh boot re-reading those at low context force-restarts on every boot, producing a loop.
+    const ctxCorroboratesOverflow = exceeds200k || (pct !== null && pct >= 85);
     const recentOutput = this.agent.getOutputBuffer()?.getRecent(8000) ?? '';
-    if (/extra usage.*?1[Mm] context|conversation too long.*?compaction/i.test(recentOutput)) {
-      this.log('Context overflow error detected in PTY output — force restarting');
+    if (ctxCorroboratesOverflow && /extra usage.*?1[Mm] context|conversation too long.*?compaction/i.test(recentOutput)) {
+      this.log('Context overflow error detected in PTY output at high context — force restarting');
       this.forceContextRestart('API overflow error in PTY output');
       return;
     }
 
     const { warn, handoff } = this.getCtxThresholds();
 
-    // No threshold configured — observe-only mode (log but don't act)
-    if (this.agent.getConfig().ctx_handoff_threshold === undefined) return;
+    // Default-ON: an UNSET ctx_handoff_threshold uses the 60% default from
+    // getCtxThresholds (handoff on for every agent with no config). An explicit
+    // ctx_handoff_threshold <= 0 is the deliberate opt-out (observe-only: log,
+    // never act). This is the only disable path now that default is on.
+    const configuredHandoff = this.agent.getConfig().ctx_handoff_threshold;
+    if (configuredHandoff !== undefined && configuredHandoff <= 0) return;
 
     const effectivePct = pct ?? (exceeds200k ? 101 : null);
     if (effectivePct === null) return;
+
+    // Session-id-independent leaked-lease release (the Claude null-session_id edge).
+    // The new-session detection above only releases a leaked lease when the bridge
+    // reports a non-null session_id. hook-context-status writes `session_id ?? null`,
+    // so a fresh Claude session reports session_id:null, that block is skipped, and a
+    // lease leaked by the agent's prior session sits in `active` until its 10-min TTL —
+    // starving the fleet handoff queue on the majority (Claude) path. Release it by name
+    // here, gated on the precise safety condition rather than the session_id proxy:
+    //   (1) effectivePct < handoff — the agent is NOT mid-handoff, so it cannot
+    //       legitimately need a handoff lease this tick; and
+    //   (2) ctxHandoffLeaseId === null — this monitor did not itself acquire the live
+    //       lease. A lease acquired by the CURRENT session always sets ctxHandoffLeaseId
+    //       synchronously at the Tier 2 acquire below (and resets context_status to 0%,
+    //       so the very next tick is below-threshold-but-lease-held). The only way to
+    //       hold a lease with this field null is that a prior session acquired it and a
+    //       full respawn recreated this monitor with null state — i.e. the leaked lease.
+    //       This is exactly the guarantee the original non-null-session_id gate gave,
+    //       without the proxy. A read-only existence check runs first so idle ticks
+    //       never pay the lease-file write.
+    if (
+      effectivePct < handoff
+      && this.ctxHandoffLeaseId === null
+      && agentHoldsContextHandoffLease(this.paths.ctxRoot, this.agent.name, now)
+    ) {
+      releaseContextHandoffLease(this.paths.ctxRoot, this.agent.name);
+      this.log('Released leaked context-handoff lease by name (fresh below-threshold session)');
+    }
+
+    // Grace window after a fresh session start: suppress soft context actions
+    // (warning + handoff) while the session is younger than HANDOFF_GRACE_MS. A
+    // just-started session cannot legitimately be at genuine overflow, so a high
+    // reading inside this window is a transient/stale spike (e.g. a fresh codex
+    // app-server thread briefly reporting prior prompt-cache tokens). Without this,
+    // such a spike fired an immediate handoff → cooperative hard-restart → fresh
+    // session, repeating every ~1-2min. The window is runtime-aware: codex-app-server
+    // and opencode can emit that spurious spike ~6-8min after boot (observed
+    // double-handoffs ~6-8min apart on a codex agent), so they get a 10min grace
+    // while all other runtimes keep 2min — see handoffGraceMs(). Hard API-overflow
+    // detection above is NOT gated by grace, so a genuine overflow is still caught
+    // immediately.
+    const HANDOFF_GRACE_MS = handoffGraceMs(this.agent.getConfig().runtime);
+    const withinHandoffGrace =
+      this.ctxSessionStartedAt > 0 && now - this.ctxSessionStartedAt < HANDOFF_GRACE_MS;
 
     // Tier 3: deadline exceeded — force restart if agent ignored handoff prompt
     if (this.ctxHandoffDeadlineAt > 0 && now > this.ctxHandoffDeadlineAt) {
@@ -2175,7 +2383,7 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     }
 
     // Tier 1: warning — PTY injection only, no Telegram ping (context management is internal)
-    if (effectivePct >= warn && now - this.ctxWarningFiredAt > 15 * 60_000) {
+    if (effectivePct >= warn && !withinHandoffGrace && now - this.ctxWarningFiredAt > 15 * 60_000) {
       this.ctxWarningFiredAt = now;
       const pctRound = Math.round(effectivePct);
       const statusSuffix = effectivePct >= handoff ? 'Handoff in progress.' : `Handoff triggers at ${handoff}%.`;
@@ -2184,8 +2392,52 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     }
 
     // Tier 2: handoff (fires once per session lifecycle)
-    if (effectivePct >= handoff && this.ctxHandoffFiredAt === 0) {
+    if (effectivePct >= handoff && this.ctxHandoffFiredAt === 0 && !withinHandoffGrace) {
+      const lease = requestContextHandoffLease({
+        ctxRoot: this.paths.ctxRoot,
+        agentName: this.agent.name,
+      });
+      if (lease.status === 'queued') {
+        if (now - this.ctxHandoffQueuedLogAt > 60_000) {
+          this.ctxHandoffQueuedLogAt = now;
+          this.log(
+            `Context handoff queued at ${Math.round(effectivePct)}% `
+            + `(position ${lease.position}, active ${lease.activeCount}, queued ${lease.queuedCount}, wait ~${Math.ceil(lease.waitMs / 1000)}s)`,
+          );
+        }
+        return;
+      }
+      this.ctxHandoffLeaseId = lease.leaseId;
       this.ctxHandoffFiredAt = now;
+
+      // Cooperative-restart loop backstop. A handoff normally fires ONCE per session and
+      // the fresh session drops well below threshold, so legitimate usage never re-fires
+      // soon. If a runtime fails to reset context on the handoff restart (e.g. a
+      // thread-persistence regression), the fresh session immediately re-crosses the
+      // threshold and re-fires every cycle — a self-sustaining treadmill the restart
+      // circuit breaker misses because these are COOPERATIVE handoff restarts, not Tier-3
+      // force-restarts. Count handoff fires in a persisted 15min window (survives the
+      // restart); if they reach the cap, trip the circuit breaker (30min pause) instead of
+      // handing off again, so any handoff loop self-limits regardless of cause. Cap 3 is
+      // above the benign 1-2 fires a single very-large turn can produce before settling.
+      this.ctxHandoffFires = this.ctxHandoffFires.filter(t => now - t < 15 * 60_000);
+      this.ctxHandoffFires.push(now);
+      this.saveCtxCircuit();
+      if (this.ctxHandoffFires.length >= 3) {
+        this.ctxCircuitBrokenAt = now;
+        this.saveCtxCircuit();
+        // Release the lease we just acquired — we are pausing, not handing off.
+        releaseContextHandoffLease(this.paths.ctxRoot, this.agent.name);
+        this.ctxHandoffLeaseId = null;
+        this.ctxHandoffFiredAt = 0;
+        const msg = `Context handoff loop detected for ${this.agent.name}: ${this.ctxHandoffFires.length} handoffs in 15min — a runtime may not be resetting context on restart. Auto-handoff paused 30min. Check logs/${this.agent.name}/restarts.log.`;
+        this.log(msg);
+        if (this.telegramApi && this.chatId) {
+          this.telegramApi.sendMessage(this.chatId, msg).catch(() => {});
+        }
+        return;
+      }
+
       this.ctxHandoffDeadlineAt = now + 5 * 60_000; // 5min grace for agent to cooperate
       // Reset context_status.json so the new session doesn't re-trigger immediately
       const statusPath = join(this.paths.stateDir, 'context_status.json');
@@ -2237,6 +2489,19 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     this.ctxHandoffFiredAt = 0;
     this.ctxHandoffDeadlineAt = 0;
     this.ctxWarningFiredAt = 0;
+
+    // Release this dying session's context-handoff lease on teardown. This restart is
+    // IN-PROCESS — sessionRefresh() below does stop()+start() on the same AgentProcess
+    // and does NOT recreate this FastChecker, so ctxHandoffLeaseId survives into the
+    // fresh session. The by-name cleanup in checkContextStatus is gated on
+    // ctxHandoffLeaseId === null, so without this it would skip a lease this session
+    // leaked when the fresh session reports session_id:null (the Tier-3 arm of the
+    // Claude null-session_id leak — the agent ignored the 5-min handoff prompt and was
+    // force-restarted). Release by name and clear the in-memory id HERE, before the
+    // restart spawns the new session, so we free the dying session's own lease — never
+    // a lease the fresh session might later acquire.
+    releaseContextHandoffLease(this.paths.ctxRoot, this.agent.name);
+    this.ctxHandoffLeaseId = null;
 
     // Write .force-fresh + .restart-planned (hardRestart from src/bus/system.ts)
     hardRestart(this.paths, this.agent.name, `CONTEXT-FORCE-RESTART: ${reason}`);
@@ -2329,6 +2594,7 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       if (!existsSync(this.ctxCircuitFile)) return;
       const data = JSON.parse(readFileSync(this.ctxCircuitFile, 'utf-8'));
       this.ctxCircuitRestarts = Array.isArray(data.restarts) ? data.restarts : [];
+      this.ctxHandoffFires = Array.isArray(data.handoffFires) ? data.handoffFires : [];
       this.ctxCircuitBrokenAt = typeof data.brokenAt === 'number' ? data.brokenAt : null;
     } catch {
       // Start fresh on error
@@ -2342,6 +2608,7 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     try {
       writeFileSync(this.ctxCircuitFile, JSON.stringify({
         restarts: this.ctxCircuitRestarts,
+        handoffFires: this.ctxHandoffFires,
         brokenAt: this.ctxCircuitBrokenAt,
       }), 'utf-8');
     } catch {

@@ -1,4 +1,4 @@
-// added 2026-04-29 by collie via dane dispatch — RFC #15 minimal stub; dispatcher wiring pending Aussie/Codex Thu execution
+// added 2026-04-29 via internal dispatch — RFC #15 minimal stub; dispatcher wiring pending an agent/Codex Thu execution
 //
 // Bus hook framework — registry loader, event matcher, dispatcher stub.
 // Schema lives at orgs/<org>/hooks.json. Per RFC #15 §4, this file is the
@@ -62,7 +62,7 @@ export interface HookRegistry {
 
 const EMPTY_REGISTRY: HookRegistry = { schema_version: '0.1', hooks: [] };
 
-// added 2026-04-29 by collie via dane dispatch — Day-2 per-handler wiring: handler-result contract
+// added 2026-04-29 via internal dispatch — Day-2 per-handler wiring: handler-result contract
 /**
  * Result a handler can return to influence which bus event the dispatcher emits.
  *
@@ -89,9 +89,9 @@ export type HandlerFn = (
   event: Event,
 ) => Promise<HandlerResult | void | undefined> | HandlerResult | void | undefined;
 
-// added 2026-04-29 by collie via dane dispatch — Day-2 per-handler wiring: in-process handler registry.
+// added 2026-04-29 via internal dispatch — Day-2 per-handler wiring: in-process handler registry.
 // Day-1 stub had a single static `dispatchHook` that always logged-and-fired. Day-2 lets callers
-// (Codex Thu / Aussie's Day-3 wiring / future skill-side handlers) register handler implementations
+// (Codex Thu / an agent's Day-3 wiring / future skill-side handlers) register handler implementations
 // per HandlerType. If no handler is registered for a hook's handler_type, dispatcher falls back to
 // the Day-1 stub behavior (log + emit `hook_fire`). This is backwards-compatible.
 const _handlerRegistry: Map<HandlerType, HandlerFn> = new Map();
@@ -129,7 +129,7 @@ export function _getRegisteredHandler(type: HandlerType): HandlerFn | undefined 
  * an empty registry, never throws. The caller is fast-checker, which must
  * never crash on registry errors.
  *
- * @param orgPath Absolute path to the org directory (e.g. /Users/.../orgs/ascendops).
+ * @param orgPath Absolute path to the org directory (e.g. /Users/.../orgs/<your-org>).
  */
 export function loadHookRegistry(orgPath: string): HookRegistry {
   const file = join(orgPath, 'hooks.json');
@@ -236,7 +236,7 @@ export async function dispatchHook(hook: HookEntry, event: Event): Promise<void>
   // Always write the local activity-log line (Day-1 behavior) for postmortem/audit.
   logHookAttempt(hook, event);
 
-  // added 2026-04-29 by collie via dane dispatch — Day-2 per-handler wiring: result-driven emit
+  // added 2026-04-29 via internal dispatch — Day-2 per-handler wiring: result-driven emit
   const handler = _handlerRegistry.get(hook.handler_type);
   let result: HandlerResult;
   if (!handler) {
@@ -246,7 +246,7 @@ export async function dispatchHook(hook: HookEntry, event: Event): Promise<void>
     try {
       const ret = await handler(hook, event);
       if (!ret) {
-        // undefined / void → implicit fire (backwards-compatible default per Dane spec)
+        // undefined / void → implicit fire (backwards-compatible default per an agent spec)
         result = { action: 'fire', reason: 'implicit_default' };
       } else {
         result = ret;
@@ -294,12 +294,12 @@ function logHookAttempt(hook: HookEntry, event: Event): void {
   // activity-log line above stays for postmortem/audit — it records every attempt regardless.
 }
 
-// added 2026-04-29 by collie via dane dispatch — Task 1: queryable hook telemetry via cortextos bus log-event
+// added 2026-04-29 via internal dispatch — Task 1: queryable hook telemetry via cortextos bus log-event
 // Best-effort: never throws, never blocks the dispatcher loop. Events go to the canonical
 // per-agent JSONL at <analyticsDir>/events/<agent>/<YYYY-MM-DD>.jsonl so they show up in
 // the same surface as task_completed, agent_message_sent, etc.
 //
-// Emit names follow Aussie's 8:10p test report taxonomy:
+// Emit names follow an agent's 8:10p test report taxonomy:
 //   - hook_fire     — a hook matched + its dispatch was attempted (today: stub-logged only)
 //   - hook_block    — a hook matched + actively blocked the calling action (gate said NO)
 //   - hook_escalate — a hook matched + raised severity / re-routed (future use; not emitted by current code paths)

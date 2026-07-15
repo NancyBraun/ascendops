@@ -61,10 +61,10 @@ flowchart TD
 npm install -g pm2
 
 # 2. Install cortextOS
-curl -fsSL https://raw.githubusercontent.com/noogalabs/ascendops/main/install.mjs | node
+curl -fsSL https://raw.githubusercontent.com/grandamenium/cortextos/main/install.mjs | node
 
 # 3. Open the project in Claude Code and run guided onboarding
-claude ~/ascendops
+claude ~/cortextos
 # Then inside Claude Code:
 # /onboarding
 ```
@@ -152,19 +152,6 @@ cortextos status             # Agent health table
 cortextos doctor             # Check prerequisites
 cortextos list-agents        # List agents
 cortextos dashboard          # Start web dashboard (--port 3000)
-```
-
----
-
-## CLI Tools
-
-Connectors that let your agent work directly inside external software (Property Meld, AppFolio, and more). Browse the shelf, install one with a single command, then add your own by PR'ing a folder into this repo.
-
-See **[CLI-TOOLS.md](./CLI-TOOLS.md)** for the tool shelf and the use + contribute guide.
-
-```bash
-# Example: add the Property Meld connector
-npx skills add noogalabs/ascendops --skill pm
 ```
 
 ---

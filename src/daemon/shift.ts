@@ -1,5 +1,5 @@
 // shift.ts — pure evaluator for per-agent shift schedules.
-// Per orgs/ascendops/docs/rfc-shift-schedule.md §3 schema + §4 behavior matrix.
+// Per your org internal docs §3 schema + §4 behavior matrix.
 //
 // Decides one of three states for a given now:
 //   - in_shift                 : daemon should fire crons / wakes as today

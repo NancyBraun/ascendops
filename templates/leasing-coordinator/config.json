@@ -1,0 +1,7 @@
+{
+  "name": "{{AGENT_NAME}}",
+  "role": "leasing-coordinator",
+  "runtime": "{{RUNTIME}}",
+  "model": "{{MODEL}}",
+  "timezone": "{{TIMEZONE}}"
+}

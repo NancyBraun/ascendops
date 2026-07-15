@@ -63,6 +63,7 @@
  */
 
 import { createHmac, timingSafeEqual } from 'crypto';
+import { redactSSN } from '../utils/ssn-redaction.js';
 
 // ============================================================================
 // Constants
@@ -1001,7 +1002,7 @@ export async function postSlackBotMessage(
       'Authorization': `Bearer ${botToken}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ channel, text }),
+    body: JSON.stringify({ channel, text: redactSSN(text) }),
     signal: AbortSignal.timeout(API_TIMEOUT_MS),
   });
 
@@ -1043,7 +1044,7 @@ export async function replySlackThread(
       'Authorization': `Bearer ${botToken}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ channel, text, thread_ts: threadTs }),
+    body: JSON.stringify({ channel, text: redactSSN(text), thread_ts: threadTs }),
     signal: AbortSignal.timeout(REACTION_TIMEOUT_MS),
   });
 }

@@ -1,0 +1,8 @@
+{
+  "focus": "Coordinates engineering specs, reviews implementation quality, protects repo hygiene, and routes builds to coding agents.",
+  "goals": [
+    "Keep work visible",
+    "Follow OPERATING_MODEL.md",
+    "Produce verified outputs"
+  ]
+}

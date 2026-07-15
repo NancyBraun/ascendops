@@ -1,0 +1,545 @@
+{
+  "_comment": "Shared PII-redaction matcher corpus (SSN + PII v2 m2: EIN, routing, bank-account). Asserted by BOTH tests/unit/utils/ssn-redaction.test.ts (JS) and knowledge-base/scripts/test_scrub_ssn.py (Python) so the two redactors stay in lockstep. For each case: redactSSN(input) === expect, AND redactSSN(redactSSN(input)) === expect (idempotency). Conservative mode (no aggressive, no labelHint). The dashboard oracle test (dashboard/src/lib/__tests__/redact-ssn.test.ts) ALSO loads this corpus but runs redactSSN(x,{aggressive:true}); a case with \"dashboardSkip\":true is excluded there because the dashboard display mirror is always-aggressive and does NOT implement the conservative bank-acct label path (bank-acct is a documented no-op on the display surface), so labeled-bank-acct cases would diverge from the aggressive oracle by design.",
+  "cases": [
+    {
+      "name": "formatted-dash",
+      "input": "123-45-6789",
+      "expect": "[REDACTED-SSN]"
+    },
+    {
+      "name": "formatted-dot",
+      "input": "123.45.6789",
+      "expect": "[REDACTED-SSN]"
+    },
+    {
+      "name": "formatted-space",
+      "input": "123 45 6789",
+      "expect": "[REDACTED-SSN]"
+    },
+    {
+      "name": "formatted-tab",
+      "input": "123\t45\t6789",
+      "expect": "[REDACTED-SSN]"
+    },
+    {
+      "name": "formatted-in-sentence",
+      "input": "Tenant SSN 123-45-6789 on file",
+      "expect": "Tenant SSN [REDACTED-SSN] on file"
+    },
+    {
+      "name": "ctx-ssn-colon",
+      "input": "SSN: 987654321",
+      "expect": "SSN: [REDACTED-SSN]"
+    },
+    {
+      "name": "ctx-social-security",
+      "input": "social security 987654321",
+      "expect": "social security [REDACTED-SSN]"
+    },
+    {
+      "name": "ctx-ss-number-spelled",
+      "input": "social security number 987654321",
+      "expect": "social security number [REDACTED-SSN]"
+    },
+    {
+      "name": "ctx-ss-number-key",
+      "input": "{\"social_security_number\":\"987654321\"}",
+      "expect": "{\"social_security_number\":\"[REDACTED-SSN]\"}"
+    },
+    {
+      "name": "ctx-taxid-colon",
+      "input": "tax id: 123456789",
+      "expect": "tax id: [REDACTED-SSN]"
+    },
+    {
+      "name": "ctx-taxid-nospace",
+      "input": "taxid 123456789",
+      "expect": "taxid [REDACTED-SSN]"
+    },
+    {
+      "name": "ctx-number-then-label",
+      "input": "987654321 is the social security number",
+      "expect": "[REDACTED-SSN] is the social security number"
+    },
+    {
+      "name": "ctx-label-newline-num",
+      "input": "SSN:\n987654321",
+      "expect": "SSN:\n[REDACTED-SSN]"
+    },
+    {
+      "name": "ctx-json-pretty-print",
+      "input": "{\n  \"ssn\": \"987654321\"\n}",
+      "expect": "{\n  \"ssn\": \"[REDACTED-SSN]\"\n}"
+    },
+    {
+      "name": "ctx-num-newline-label",
+      "input": "987654321\nis the ssn",
+      "expect": "[REDACTED-SSN]\nis the ssn"
+    },
+    {
+      "name": "gap-16-boundary-in",
+      "input": "ssn################987654321",
+      "expect": "ssn################[REDACTED-SSN]"
+    },
+    {
+      "name": "gap-17-boundary-out",
+      "input": "ssn#################987654321",
+      "expect": "ssn#################987654321"
+    },
+    {
+      "name": "fp-bare9-no-label",
+      "input": "order 987654321 shipped",
+      "expect": "order 987654321 shipped"
+    },
+    {
+      "name": "fp-phone-dash",
+      "input": "Call Alex at 423-555-0142",
+      "expect": "Call Alex at 423-555-0142"
+    },
+    {
+      "name": "fp-phone-dot-ip",
+      "input": "423.555.0142 ip 192.168.10.1",
+      "expect": "423.555.0142 ip 192.168.10.1"
+    },
+    {
+      "name": "fp-adjacent-id",
+      "input": "Value 123-45-6789 id 987654321",
+      "expect": "Value [REDACTED-SSN] id 987654321"
+    },
+    {
+      "name": "fp-far-label-taxid",
+      "input": "tax id 111-22-3333, ref 987654321",
+      "expect": "tax id [REDACTED-SSN], ref 987654321"
+    },
+    {
+      "name": "fp-far-label-ssn",
+      "input": "ssn 111-22-3333 and acct 987654321",
+      "expect": "ssn [REDACTED-SSN] and acct 987654321"
+    },
+    {
+      "name": "fp-multiline-numbers",
+      "input": "123\n45\n6789",
+      "expect": "123\n45\n6789"
+    },
+    {
+      "name": "fp-multiline-crlf",
+      "input": "123\r\n45\r\n6789",
+      "expect": "123\r\n45\r\n6789"
+    },
+    {
+      "name": "fp-decimal-pi",
+      "input": "3.14159 pi",
+      "expect": "3.14159 pi"
+    },
+    {
+      "name": "fp-already-redacted",
+      "input": "Value [REDACTED-SSN] id 987654321",
+      "expect": "Value [REDACTED-SSN] id 987654321"
+    },
+    {
+      "name": "uspace-nbsp",
+      "input": "123\u00a045\u00a06789",
+      "expect": "[REDACTED-SSN]"
+    },
+    {
+      "name": "uspace-figure",
+      "input": "123\u200745\u20076789",
+      "expect": "[REDACTED-SSN]"
+    },
+    {
+      "name": "uspace-narrow-nbsp",
+      "input": "123\u202f45\u202f6789",
+      "expect": "[REDACTED-SSN]"
+    },
+    {
+      "name": "uspace-thin",
+      "input": "123\u200945\u20096789",
+      "expect": "[REDACTED-SSN]"
+    },
+    {
+      "name": "uspace-ideographic",
+      "input": "123\u300045\u30006789",
+      "expect": "[REDACTED-SSN]"
+    },
+    {
+      "name": "uspace-ctx-nbsp",
+      "input": "SSN: 123\u00a045\u00a06789",
+      "expect": "SSN: [REDACTED-SSN]"
+    },
+    {
+      "name": "fp-uspace-phone-nbsp",
+      "input": "call 423\u00a0710\u00a01234",
+      "expect": "call 423\u00a0710\u00a01234"
+    },
+    {
+      "name": "fp-figure-col-non-ssn",
+      "input": "row 12345\u200767890 end",
+      "expect": "row 12345\u200767890 end"
+    },
+    {
+      "name": "fp-accented-text",
+      "input": "caf\u00e9 se\u00f1or 12345678",
+      "expect": "caf\u00e9 se\u00f1or 12345678"
+    },
+    {
+      "name": "fp-uspace-3-3-4-not-ssn",
+      "input": "id 123\u2007456\u20077890",
+      "expect": "id 123\u2007456\u20077890"
+    },
+    {
+      "name": "letter-adjacent-formatted",
+      "input": "caf\u00e9123-45-6789",
+      "expect": "caf\u00e9[REDACTED-SSN]"
+    },
+    {
+      "name": "letter-adjacent-ctx-bare9",
+      "input": "tax id caf\u00e9987654321",
+      "expect": "tax id caf\u00e9[REDACTED-SSN]"
+    },
+    {
+      "name": "parity-s-nbsp-in-label",
+      "input": "social\u00a0security 987654321",
+      "expect": "social\u00a0security [REDACTED-SSN]"
+    },
+    {
+      "name": "parity-d-fullwidth-survives",
+      "input": "\uff11\uff12\uff13-\uff14\uff15-\uff16\uff17\uff18\uff19",
+      "expect": "\uff11\uff12\uff13-\uff14\uff15-\uff16\uff17\uff18\uff19"
+    },
+    {
+      "name": "inv-zwsp-formatted",
+      "input": "12\u200b3-45-6789",
+      "expect": "[REDACTED-SSN]"
+    },
+    {
+      "name": "inv-zwsp-ctx-bare9",
+      "input": "ssn 987\u200b654321",
+      "expect": "ssn [REDACTED-SSN]"
+    },
+    {
+      "name": "inv-cgj-ctx",
+      "input": "ssn 9876\u034f54321",
+      "expect": "ssn [REDACTED-SSN]"
+    },
+    {
+      "name": "inv-hangul-filler-ctx",
+      "input": "ssn 9876\u115f54321",
+      "expect": "ssn [REDACTED-SSN]"
+    },
+    {
+      "name": "inv-varsel-ctx",
+      "input": "ssn 9876\ufe0f54321",
+      "expect": "ssn [REDACTED-SSN]"
+    },
+    {
+      "name": "inv-ffa0-ctx",
+      "input": "ssn 9876\uffa054321",
+      "expect": "ssn [REDACTED-SSN]"
+    },
+    {
+      "name": "fp-zwj-emoji",
+      "input": "team \ud83d\udc68\u200d\ud83d\udc69\u200d\ud83d\udc67 ok",
+      "expect": "team \ud83d\udc68\u200d\ud83d\udc69\u200d\ud83d\udc67 ok"
+    },
+    {
+      "name": "fp-indic-zwnj",
+      "input": "tenant \u0915\u200c\u0937 naam",
+      "expect": "tenant \u0915\u200c\u0937 naam"
+    },
+    {
+      "name": "fp-zwj-in-word",
+      "input": "a\u200db\u200dc done",
+      "expect": "a\u200db\u200dc done"
+    },
+    {
+      "name": "label-sep-feff",
+      "input": "social\ufeffsecurity 123456789",
+      "expect": "social\ufeffsecurity [REDACTED-SSN]"
+    },
+    {
+      "name": "label-sep-nel",
+      "input": "social\u0085security 123456789",
+      "expect": "social\u0085security [REDACTED-SSN]"
+    },
+    {
+      "name": "label-exotic-case-survives",
+      "input": "\u017focial security 123456789",
+      "expect": "\u017focial security 123456789"
+    },
+    {
+      "name": "astral-run-in-gap-redacts",
+      "input": "ssn \ud834\udd73\ud834\udd73\ud834\udd73\ud834\udd73\ud834\udd73\ud834\udd73\ud834\udd73\ud834\udd73 987654321",
+      "expect": "ssn \ud834\udd73\ud834\udd73\ud834\udd73\ud834\udd73\ud834\udd73\ud834\udd73\ud834\udd73\ud834\udd73 [REDACTED-SSN]"
+    },
+    {
+      "name": "glue-letter-prefix-formatted",
+      "input": "applicantId123-45-6789",
+      "expect": "applicantId[REDACTED-SSN]"
+    },
+    {
+      "name": "glue-letter-suffix-formatted",
+      "input": "SSN:123-45-6789end",
+      "expect": "SSN:[REDACTED-SSN]end"
+    },
+    {
+      "name": "glue-dash-prefix-formatted",
+      "input": "ssn-123-45-6789",
+      "expect": "ssn-[REDACTED-SSN]"
+    },
+    {
+      "name": "glue-label-glued-formatted",
+      "input": "ssn123-45-6789",
+      "expect": "ssn[REDACTED-SSN]"
+    },
+    {
+      "name": "fp-glue-10digit-run",
+      "input": "run 1234567890 end",
+      "expect": "run 1234567890 end"
+    },
+    {
+      "name": "dashed-label-tax-id",
+      "input": "tax-id-987654321",
+      "expect": "tax-id-[REDACTED-SSN]"
+    },
+    {
+      "name": "dashed-label-social-security",
+      "input": "social-security 987654321",
+      "expect": "social-security [REDACTED-SSN]"
+    },
+    {
+      "name": "fp-acct-not-a-label",
+      "input": "acct-987654321",
+      "expect": "acct-987654321"
+    },
+    {
+      "name": "ein-formatted-dash",
+      "input": "12-3456789",
+      "expect": "[REDACTED-EIN]"
+    },
+    {
+      "name": "ein-formatted-in-sentence",
+      "input": "EIN 12-3456789 on file",
+      "expect": "EIN [REDACTED-EIN] on file"
+    },
+    {
+      "name": "ein-formatted-no-label",
+      "input": "employer 12-3456789",
+      "expect": "employer [REDACTED-EIN]"
+    },
+    {
+      "name": "ein-formatted-not-ssn-format-wins",
+      "input": "ssn 12-3456789",
+      "expect": "ssn [REDACTED-EIN]"
+    },
+    {
+      "name": "ein-bare9-ein-label",
+      "input": "ein 123456789",
+      "expect": "ein [REDACTED-EIN]"
+    },
+    {
+      "name": "ein-bare9-fein-label",
+      "input": "fein 123456789",
+      "expect": "fein [REDACTED-EIN]"
+    },
+    {
+      "name": "ein-bare9-employer-id",
+      "input": "employer id 123456789",
+      "expect": "employer id [REDACTED-EIN]"
+    },
+    {
+      "name": "fp-ein-bare9-no-label",
+      "input": "ref 123456789 end",
+      "expect": "ref 123456789 end"
+    },
+    {
+      "name": "collision-ssn-label-wins-over-ein-bare9",
+      "input": "ssn 123456789",
+      "expect": "ssn [REDACTED-SSN]"
+    },
+    {
+      "name": "collision-ssn-over-routing-both-labels",
+      "input": "ssn routing 123456789",
+      "expect": "ssn routing [REDACTED-SSN]"
+    },
+    {
+      "name": "routing-bare9-routing-label",
+      "input": "routing 021000021",
+      "expect": "routing [REDACTED-ROUTING]"
+    },
+    {
+      "name": "routing-bare9-aba-label",
+      "input": "aba 021000021",
+      "expect": "aba [REDACTED-ROUTING]"
+    },
+    {
+      "name": "routing-bare9-routing-transit",
+      "input": "routing transit 021000021",
+      "expect": "routing transit [REDACTED-ROUTING]"
+    },
+    {
+      "name": "fp-routing-bare9-no-label",
+      "input": "ref 021000021 end",
+      "expect": "ref 021000021 end"
+    },
+    {
+      "name": "fp-transit-bare-not-a-label",
+      "input": "transit 021000021",
+      "expect": "transit 021000021"
+    },
+    {
+      "name": "bank-acct-label-9digit",
+      "input": "account number 123456789",
+      "expect": "account number [REDACTED-BANK-ACCT]"
+    },
+    {
+      "name": "bank-acct-label-12digit",
+      "input": "bank account 123456789012",
+      "expect": "bank account [REDACTED-BANK-ACCT]"
+    },
+    {
+      "name": "bank-acct-bank-acct-8digit",
+      "input": "bank acct 12345678",
+      "expect": "bank acct [REDACTED-BANK-ACCT]"
+    },
+    {
+      "name": "fp-bank-acct-no-label",
+      "input": "ref 123456789012 end",
+      "expect": "ref 123456789012 end"
+    },
+    {
+      "name": "fp-bank-acct-checking-not-a-label",
+      "input": "checking 123456789012",
+      "expect": "checking 123456789012"
+    },
+    {
+      "name": "fp-bank-acct-short-3digit-floor",
+      "input": "bank account 123 end",
+      "expect": "bank account 123 end"
+    },
+    {
+      "name": "fp-bank-acct-too-long-18digit",
+      "input": "bank account 123456789012345678 end",
+      "expect": "bank account 123456789012345678 end"
+    },
+    {
+      "name": "fp-ein-zip-plus4",
+      "input": "zip 12345-6789",
+      "expect": "zip 12345-6789"
+    },
+    {
+      "name": "fp-10digit-phone-bare",
+      "input": "phone 4237101234",
+      "expect": "phone 4237101234"
+    },
+    {
+      "name": "fp-routing-aba-substring-database",
+      "input": "database 123456789",
+      "expect": "database 123456789"
+    },
+    {
+      "name": "fp-routing-aba-substring-alibaba",
+      "input": "Alibaba 123456789",
+      "expect": "Alibaba 123456789"
+    },
+    {
+      "name": "fp-routing-substring-rerouting",
+      "input": "rerouting 123456789",
+      "expect": "rerouting 123456789"
+    },
+    {
+      "name": "fp-ein-substring-protein",
+      "input": "protein 123456789",
+      "expect": "protein 123456789"
+    },
+    {
+      "name": "fp-ein-substring-vein",
+      "input": "vein 123456789",
+      "expect": "vein 123456789"
+    },
+    {
+      "name": "fp-fein-substring-caffeine",
+      "input": "caffeine 123456789",
+      "expect": "caffeine 123456789"
+    },
+    {
+      "name": "routing-word-anchored-still-matches-routing-number",
+      "input": "routing number 021000021",
+      "expect": "routing number [REDACTED-ROUTING]"
+    },
+    {
+      "name": "ein-word-anchored-still-matches-fein",
+      "input": "fein 123456789",
+      "expect": "fein [REDACTED-EIN]"
+    },
+    {
+      "name": "f5-routing-snake-case-routing_number",
+      "input": "routing_number 021000021",
+      "expect": "routing_number [REDACTED-ROUTING]"
+    },
+    {
+      "name": "f5-routing-snake-case-aba_routing",
+      "input": "aba_routing 021000021",
+      "expect": "aba_routing [REDACTED-ROUTING]"
+    },
+    {
+      "name": "f5-routing-json-key-shape",
+      "input": "{\"routing_number\":\"021000021\"}",
+      "expect": "{\"routing_number\":\"[REDACTED-ROUTING]\"}"
+    },
+    {
+      "name": "f5-fp-routing_table-networking-no-redact",
+      "input": "routing_table 021000021",
+      "expect": "routing_table 021000021"
+    },
+    {
+      "name": "f5-fp-routing_protocol-networking-no-redact",
+      "input": "routing_protocol 021000021",
+      "expect": "routing_protocol 021000021"
+    },
+    {
+      "name": "f5-ein-snake-case-ein_number",
+      "input": "ein_number 123456789",
+      "expect": "ein_number [REDACTED-EIN]"
+    },
+    {
+      "name": "f5-ein-snake-case-fein_number",
+      "input": "fein_number 123456789",
+      "expect": "fein_number [REDACTED-EIN]"
+    },
+    {
+      "name": "f5-fp-ein-substring-protein-still-safe",
+      "input": "protein_number 123456789",
+      "expect": "protein_number 123456789"
+    },
+    {
+      "name": "letterbound-ein-snake-case-ein_value",
+      "input": "ein_value 123456789",
+      "expect": "ein_value [REDACTED-EIN]"
+    },
+    {
+      "name": "letterbound-bank-snake-case-bank_account_number",
+      "input": "bank_account_number 123456789012",
+      "expect": "bank_account_number [REDACTED-BANK-ACCT]"
+    },
+    {
+      "name": "letterbound-bank-json-key-shape",
+      "input": "{\"bank_account_number\":\"123456789012\"}",
+      "expect": "{\"bank_account_number\":\"[REDACTED-BANK-ACCT]\"}"
+    },
+    {
+      "name": "letterbound-fp-ein-substring-being-no-redact",
+      "input": "being 123456789",
+      "expect": "being 123456789"
+    },
+    {
+      "name": "letterbound-fp-ein-substring-Einstein-no-redact",
+      "input": "Einstein 123456789",
+      "expect": "Einstein 123456789"
+    },
+    {
+      "name": "letterbound-fp-bank-substring-embankment-no-redact",
+      "input": "embankment 123456789",
+      "expect": "embankment 123456789"
+    }
+  ]
+}

@@ -71,6 +71,20 @@ describe('sendViaRelay', () => {
     expect(body.photo_url).toBeUndefined();
   });
 
+  it('scrubs an SSN from the text before sending (egress-primitive scrub)', async () => {
+    process.env.RELAY_URL = 'http://localhost:4242';
+    process.env.RELAY_INTERNAL_TOKEN = 'tok';
+    let capturedInit: RequestInit | undefined;
+    globalThis.fetch = vi.fn(async (_url, init) => {
+      capturedInit = init as any;
+      return { ok: true, status: 202, json: async () => ({}) } as unknown as Response;
+    });
+    await sendViaRelay({ to: '+15551234567', text: 'your SSN is 123-45-6789, thanks' });
+    const body = JSON.parse(capturedInit?.body as string);
+    expect(body.text).toBe('your SSN is [REDACTED-SSN], thanks');
+    expect(body.text).not.toContain('123-45-6789');
+  });
+
   it('includes photo_url in body when provided (MMS path)', async () => {
     process.env.RELAY_URL = 'http://localhost:4242';
     process.env.RELAY_INTERNAL_TOKEN = 'tok';

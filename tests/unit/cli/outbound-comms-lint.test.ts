@@ -200,9 +200,12 @@ describe('outbound comms lint', () => {
     expect(telegramSendSpy).not.toHaveBeenCalled();
   });
 
-  it('blocks send-telegram by default when message contains an agent name', async () => {
+  it('blocks send-telegram by default (fail-safe floor: caller own name, no roster) ', async () => {
+    // Config-drive: agent-name lint is roster-driven, NOT a hardcoded set. The FAIL-SAFE
+    // floor is the calling agent's OWN identity (CTX_AGENT_NAME='test-agent') — so even
+    // with zero org roster configured, an agent can never leak its own name.
     await expect(
-      busCommand.parseAsync(['send-telegram', '12345', 'Codie just shipped the work'], { from: 'user' })
+      busCommand.parseAsync(['send-telegram', '12345', 'test-agent just shipped the work'], { from: 'user' })
     ).rejects.toThrow();
     expect(telegramSendSpy).not.toHaveBeenCalled();
   });

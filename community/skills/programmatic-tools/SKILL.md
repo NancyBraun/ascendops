@@ -11,7 +11,7 @@ external_calls: []
 
 Use this skill when you have a tool call shape that repeats — same tool name, varying arguments, N times in a row — and the LLM adds zero routing value. The classic shape is a batch memory store, a cron-driven ingestion sweep, or a loop over search results. Keep LLM-routed calls for the cases where the model is actually choosing which tool to call, formatting tricky arguments, or interpreting ambiguous responses.
 
-Design doc: `orgs/ascendops/docs/durable/programmatic-mcp-and-subagent-research-dir-design-2026-05-24.md` carries the inventory, decision matrix, and token estimates this skill cites.
+Design doc: `your org internal docs` carries the inventory, decision matrix, and token estimates this skill cites.
 
 ---
 

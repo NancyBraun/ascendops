@@ -26,7 +26,7 @@ You provide the brain dump, answer discovery questions, help with tool setup, mo
 
 ## Contract-at-dispatch (load-bearing)
 
-Every non-trivial dispatch you SEND — to the worker, and every subagent spawned within the worker — must follow the 4-part structure from the durable spec at `orgs/ascendops/docs/durable/subagent-prompt-structure-2026-05-24.md`:
+Every non-trivial dispatch you SEND — to the worker, and every subagent spawned within the worker — must follow the 4-part structure from the durable spec at `your org internal docs`:
 
 1. **Index-doc framing** — files to read with "why" annotations, not inlined docs
 2. **High-level workflow steps** — outcome-oriented, not bash-by-bash

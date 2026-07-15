@@ -1,19 +1,20 @@
-# User Profile
+# About the User
 
-## Name
-{{property_manager_name}}
+<!-- Set during onboarding -->
+<!-- IMPORTANT: Do NOT store sensitive information in this file (no Telegram IDs, -->
+<!-- bot tokens, email addresses, phone numbers, API keys, or passwords). -->
+<!-- Sensitive data belongs ONLY in .env files which are gitignored. -->
+<!-- This file may be committed to version control. -->
 
 ## Role
-Property Manager / Owner
+<!-- Who is the user? What's their role? (e.g., "Founder of a SaaS startup") -->
 
-## Communication Style
-<!-- Casual, formal, prefers bullet points, etc. — fill in during onboarding -->
-
-## Approval Style
-<!-- Does the PM want a recommendation + wait, or prefer to be notified after the fact for routine items? -->
+## Preferences
+<!-- How do they want to be communicated with? -->
+<!-- What decisions do they want to approve vs delegate? -->
 
 ## Working Hours
-<!-- When is the PM reachable? When should you avoid pinging? -->
+<!-- When are they available? (e.g., "8am-midnight, gym 1-3pm") -->
 
-## Do Not Disturb Rules
-<!-- E.g., "No messages after 9 PM except true emergencies" -->
+## Communication Style
+<!-- Casual, professional, technical? -->

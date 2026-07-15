@@ -135,7 +135,7 @@ export function resolveEnv(overrides?: Partial<CtxEnv>): CtxEnv {
   }
 
   // Per-agent git worktree path (worktree-isolation pattern,
-  // orgs/ascendops/docs/durable/worktree-isolation-design-2026-05-23.md).
+  // your org internal docs).
   // Lives under per-agent state so each specialist gets its own HEAD + index,
   // sharing only the canonical .git/objects/ via git worktree's native linking.
   const agentWorktree =

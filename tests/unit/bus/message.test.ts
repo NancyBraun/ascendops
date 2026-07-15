@@ -63,6 +63,16 @@ describe('Message Bus', () => {
       expect(files[0]).toMatch(/^2-\d+-from-sender-[a-z0-9]{5}\.json$/);
     });
 
+    it('scrubs SSNs from the message text at the primitive (covers every inbox writer)', () => {
+      sendMessage(senderPaths, 'paul', 'boris', 'normal',
+        'tenant SSN 123-45-6789 and 987654321 under ssn');
+      const receiverInbox = join(testDir, 'inbox', 'boris');
+      const files = readdirSync(receiverInbox).filter(f => f.endsWith('.json'));
+      const content = JSON.parse(readFileSync(join(receiverInbox, files[0]), 'utf-8'));
+      expect(content.text).toBe('tenant SSN [REDACTED-SSN] and [REDACTED-SSN] under ssn');
+      expect(content.text).not.toContain('123-45-6789');
+    });
+
     it('produces JSON matching bash format', () => {
       sendMessage(senderPaths, 'paul', 'boris', 'high', 'Build the page');
 

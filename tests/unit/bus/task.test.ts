@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { createTask, updateTask, completeTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, findTaskFile } from '../../../src/bus/task';
+import { createTask, updateTask, completeTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, findTaskFile, archiveTasks } from '../../../src/bus/task';
 import type { BusPaths } from '../../../src/types';
 
 describe('Task Management', () => {
@@ -29,7 +29,112 @@ describe('Task Management', () => {
     rmSync(testDir, { recursive: true, force: true });
   });
 
+  describe('path-traversal hardening (#13/#14)', () => {
+    it('findTaskFile rejects a traversal task id', () => {
+      expect(() => findTaskFile(paths, '../../etc/passwd')).toThrow(/Invalid task id/);
+      expect(() => findTaskFile(paths, 'task/../../secrets')).toThrow(/Invalid task id/);
+      expect(() => findTaskFile(paths, 'task_1.json')).toThrow(/Invalid task id/);
+    });
+
+    it('readTaskAudit rejects a traversal task id', () => {
+      expect(() => readTaskAudit(paths, '../../../etc/shadow')).toThrow(/Invalid task id/);
+    });
+
+    it('findTaskFile still resolves a legitimate task', () => {
+      const id = createTask(paths, 'paul', 'acme', 'T', { assignee: 'boris' });
+      expect(findTaskFile(paths, id)).toContain(`${id}.json`);
+    });
+
+    it('archiveTasks skips a task whose JSON id is tampered with traversal (no escape)', () => {
+      mkdirSync(paths.taskDir, { recursive: true });
+      // Safe filename, but the internal id carries traversal that would resolve
+      // to testDir/escaped.json (outside the task tree) on archive write/rename.
+      writeFileSync(join(paths.taskDir, 'task_evil_1.json'), JSON.stringify({
+        id: '../escaped', status: 'completed', completed_at: '2020-01-01T00:00:00Z',
+        assigned_to: 'boris', org: 'acme',
+      }));
+      expect(() => archiveTasks(paths)).not.toThrow();
+      // The guard must have prevented the out-of-tree write.
+      expect(existsSync(join(testDir, 'escaped.json'))).toBe(false);
+    });
+  });
+
+  describe('createTask --blocks dependency validation (PR #147 P2 fix)', () => {
+    // Count only task_*.json so we can assert "ZERO task files written" on failure.
+    const taskFiles = () =>
+      existsSync(paths.taskDir)
+        ? readdirSync(paths.taskDir).filter((f) => f.startsWith('task_') && f.endsWith('.json'))
+        : [];
+
+    it('rejects a traversal --blocks id and writes ZERO task files (no orphan)', () => {
+      expect(() =>
+        createTask(paths, 'paul', 'acme', 'T', { blocks: ['../../etc/passwd'] }),
+      ).toThrow(/Invalid task id/);
+      // The bug: the task file was persisted BEFORE addSymmetricEdge threw.
+      expect(taskFiles()).toHaveLength(0);
+    });
+
+    it('rejects a .json-suffixed --blocks id before any write', () => {
+      expect(() =>
+        createTask(paths, 'paul', 'acme', 'T', { blocks: ['task_1.json'] }),
+      ).toThrow(/Invalid task id/);
+      expect(taskFiles()).toHaveLength(0);
+    });
+
+    it('still rejects a traversal blocked_by id and writes ZERO task files', () => {
+      expect(() =>
+        createTask(paths, 'paul', 'acme', 'T', { blockedBy: ['../../etc/passwd'] }),
+      ).toThrow(/Invalid task id/);
+      expect(taskFiles()).toHaveLength(0);
+    });
+
+    it('writes the task + symmetric blocked_by edge for a valid --blocks peer', () => {
+      const peer = createTask(paths, 'paul', 'acme', 'Downstream');
+      const id = createTask(paths, 'paul', 'acme', 'Upstream', { blocks: [peer] });
+      const up = JSON.parse(readFileSync(join(paths.taskDir, `${id}.json`), 'utf-8'));
+      expect(up.blocks).toEqual([peer]);
+      const down = JSON.parse(readFileSync(join(paths.taskDir, `${peer}.json`), 'utf-8'));
+      expect(down.blocked_by).toContain(id);
+    });
+
+    it('permits a valid-format but missing --blocks id (dangling ref, no existence check)', () => {
+      const id = createTask(paths, 'paul', 'acme', 'T', { blocks: ['task_9999_00000001'] });
+      const content = JSON.parse(readFileSync(join(paths.taskDir, `${id}.json`), 'utf-8'));
+      expect(content.blocks).toEqual(['task_9999_00000001']);
+    });
+
+    it('still throws on a real dependency cycle (and leaves no new task file)', () => {
+      const peer = createTask(paths, 'paul', 'acme', 'Peer');
+      const before = taskFiles().length;
+      // T both blocks and is blocked_by peer -> peer ultimately blocks itself via T.
+      expect(() =>
+        createTask(paths, 'paul', 'acme', 'Cyclic', { blocks: [peer], blockedBy: [peer] }),
+      ).toThrow(/cycle/i);
+      expect(taskFiles()).toHaveLength(before);
+    });
+  });
+
   describe('createTask', () => {
+    it('scrubs SSNs from the task title and description before persisting', () => {
+      const taskId = createTask(paths, 'paul', 'acme', 'WO for tenant 123-45-6789', {
+        description: 'resident ssn 987654321 — confirm before scheduling',
+      });
+      const content = JSON.parse(readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8'));
+      expect(content.title).toBe('WO for tenant [REDACTED-SSN]');
+      expect(content.description).toBe('resident ssn 987654321 — confirm before scheduling'.replace('987654321', '[REDACTED-SSN]'));
+      expect(JSON.stringify(content)).not.toContain('123-45-6789');
+      expect(JSON.stringify(content)).not.toContain('987654321');
+    });
+
+    it('scrubs SSNs from the AUDIT log note too (sibling sink, not just the object) at create + complete', () => {
+      const taskId = createTask(paths, 'paul', 'acme', 'WO tenant 123-45-6789', { description: 'x' });
+      completeTask(paths, taskId, 'done — resident ssn 987654321 verified');
+      const auditStr = JSON.stringify(readTaskAudit(paths, taskId));
+      expect(auditStr).not.toContain('123-45-6789'); // create audit note: title
+      expect(auditStr).not.toContain('987654321');   // complete audit note: result
+      expect(auditStr).toContain('[REDACTED-SSN]');
+    });
+
     it('creates task with correct JSON format', () => {
       const taskId = createTask(paths, 'paul', 'acme', 'Build landing page', {
         description: 'Create a product landing page',

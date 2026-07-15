@@ -4,6 +4,17 @@ import { join } from 'path';
 import { homedir } from 'os';
 import type { BusPaths } from '../types/index.js';
 import { normalizeOrgName } from '../utils/org.js';
+import { assertNoOwnerPrivatePaths } from './kb-privacy.js';
+
+// NOTE: SSN scrubbing for the knowledge base is enforced at the PERSISTENCE
+// POINT inside the mmrag ingest tool (knowledge-base/scripts/mmrag.py), NOT
+// here. The ingest passes file PATHS to mmrag, which reads/transcribes each
+// file (recursing into directories) and embeds the text. Scrubbing in mmrag
+// — on the final text including any Gemini transcription, fail-closed —
+// covers directory inputs, preserves the original source path (so the
+// shared-collection allowlist, provenance, dedup and delete-by-path all keep
+// working), and has no read/scrub TOCTOU. An earlier JS-side temp-file scrub
+// here was removed because substituting a temp path broke all of the above.
 
 /**
  * Knowledge base integration — calls mmrag.py directly (cross-platform,
@@ -115,12 +126,53 @@ export interface KBQueryResponse {
  * Query the knowledge base.
  * Returns parsed JSON results when --json is used internally.
  */
+/**
+ * Private KB is caller-scoped (mirror of the ingest anti-spoof in kb-privacy.ts).
+ * A private `agent-<X>` collection may be queried ONLY by its owning agent runtime:
+ * the effective agent is the RUNTIME identity (`CTX_AGENT_NAME`, `runtimeAgent`), and
+ * an explicit `--agent` (`requestedAgent`) naming a DIFFERENT agent is refused — that
+ * would read another agent's private store, a privacy-wall violation by definition
+ * (departments report UP via events, never read DOWN into a private KB). Without a
+ * runtime identity, `--scope private` has no own-collection to address; `--scope all`
+ * simply addresses no `agent-<X>` (shared-only). `--scope shared` is unaffected.
+ *
+ * Trust model matches the ingest guard: self-hosted TRUSTED fleet; this closes the
+ * realistic flag-override / cross-agent-read hole (`--agent <other>`), not an OS-level
+ * env spoof (a process that can set CTX_AGENT_NAME can also read the Chroma files
+ * directly — the same fs-trust boundary).
+ */
+export function assertQueryIdentity(
+  scope: 'shared' | 'private' | 'all',
+  runtimeAgent: string | undefined,
+  requestedAgent: string | undefined,
+): void {
+  if (scope === 'shared') return; // no agent-<X> collection is addressed
+  if (requestedAgent && requestedAgent !== runtimeAgent) {
+    throw new Error(
+      `[kb] BLOCKED: private KB is caller-scoped. --agent "${requestedAgent}" does not match ` +
+        `the runtime identity "${runtimeAgent ?? '(none)'}". An agent may query only its OWN ` +
+        `private collection (agent-<self>); a cross-agent private read is a privacy-wall ` +
+        `violation. See your org internal docs.`,
+    );
+  }
+  if (scope === 'private' && !runtimeAgent) {
+    throw new Error(
+      `[kb] BLOCKED: --scope private needs a runtime agent identity (CTX_AGENT_NAME) to address ` +
+        `your own private collection; none resolved. Use --scope shared, or run within an agent runtime.`,
+    );
+  }
+  // scope 'all' with no runtime identity addresses no agent-<X> (shared-only) — safe.
+}
+
 export function queryKnowledgeBase(
   paths: BusPaths,
   question: string,
   options: {
     org: string;
+    /** The RUNTIME identity (CTX_AGENT_NAME) — the ONLY agent whose private collection this call may address. */
     agent?: string;
+    /** An explicit `--agent` flag, if any. Must equal `agent` (the runtime identity) or the call is refused. */
+    requestedAgent?: string;
     scope?: 'shared' | 'private' | 'all';
     topK?: number;
     threshold?: number;
@@ -128,7 +180,13 @@ export function queryKnowledgeBase(
     instanceId: string;
   },
 ): KBQueryResponse {
-  const { agent, scope = 'all', topK = 5, threshold = 0.5, frameworkRoot, instanceId } = options;
+  const { agent, requestedAgent, scope = 'all', topK = 5, threshold = 0.5, frameworkRoot, instanceId } =
+    options;
+
+  // Caller-scoped private KB: refuse a mismatched --agent (or private with no runtime
+  // identity) BEFORE any collection is chosen or mmrag is spawned. Mirrors the ingest
+  // anti-spoof so ingest + query enforce ONE policy: an agent touches only agent-<self>.
+  assertQueryIdentity(scope, agent, requestedAgent);
   // Normalize once at the top so every downstream path join, env var, and
   // ChromaDB collection name uses the canonical filesystem casing. Without
   // this, `shared-acmecorp` and `shared-AcmeCorp` become two
@@ -253,6 +311,16 @@ export function ingestKnowledgeBase(
   },
 ): void {
   const { agent, scope = 'shared', force, frameworkRoot, instanceId } = options;
+
+  // EA privacy wall (W1-C): owner-private content must never enter ANY KB
+  // collection, shared OR private. Enforced here at the single Node entry point
+  // every `bus kb-ingest` flows through, BEFORE a collection is chosen or mmrag is
+  // spawned, so even a bare shared-default ingest of owner-private material is
+  // refused. Symlink-resolved + directory-recursive (see kb-privacy.ts). Narrowed
+  // (Fable ruling): an agent ingesting its OWN memory into its OWN private scope is
+  // allowed (the heartbeat); state/ea + crm stay blocked under every scope.
+  assertNoOwnerPrivatePaths(paths, { scope, agent });
+
   // Normalize once (see queryKnowledgeBase for rationale).
   const org = normalizeOrgName(frameworkRoot, options.org);
 

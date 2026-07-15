@@ -51,7 +51,7 @@ function writeLogEntries(agentName: string, entries: CronExecutionLogEntry[]): v
 
 function makeEntry(
   cronName: string,
-  status: 'fired' | 'retried' | 'failed',
+  status: CronExecutionLogEntry['status'],
   tsOffset = 0,
 ): CronExecutionLogEntry {
   return {
@@ -158,11 +158,11 @@ describe('getExecutionLogPage — basic pagination', () => {
 // ---------------------------------------------------------------------------
 
 describe('getExecutionLogPage — statusFilter', () => {
-  it('success filter returns only "fired" entries', async () => {
+  it('success filter returns fired and confirmed entries', async () => {
     const entries = [
       makeEntry('heartbeat', 'fired', 0),
       makeEntry('heartbeat', 'failed', 1),
-      makeEntry('heartbeat', 'fired', 2),
+      makeEntry('heartbeat', 'confirmed', 2),
       makeEntry('heartbeat', 'retried', 3),
       makeEntry('heartbeat', 'fired', 4),
     ];
@@ -170,23 +170,24 @@ describe('getExecutionLogPage — statusFilter', () => {
     const { getExecutionLogPage } = await importCrons();
 
     const page = getExecutionLogPage('boris', 'heartbeat', 100, 0, 'success');
-    expect(page.entries.every(e => e.status === 'fired')).toBe(true);
-    expect(page.total).toBe(3); // 3 fired entries
+    expect(page.entries.every(e => e.status === 'fired' || e.status === 'confirmed')).toBe(true);
+    expect(page.total).toBe(3); // 2 fired + 1 confirmed entries
   });
 
-  it('failure filter returns only "failed" entries', async () => {
+  it('failure filter returns failed and persistent no-op entries', async () => {
     const entries = [
       makeEntry('heartbeat', 'fired', 0),
       makeEntry('heartbeat', 'failed', 1),
       makeEntry('heartbeat', 'failed', 2),
       makeEntry('heartbeat', 'fired', 3),
+      makeEntry('heartbeat', 'noop_persistent', 4),
     ];
     writeLogEntries('boris', entries);
     const { getExecutionLogPage } = await importCrons();
 
     const page = getExecutionLogPage('boris', 'heartbeat', 100, 0, 'failure');
-    expect(page.entries.every(e => e.status === 'failed')).toBe(true);
-    expect(page.total).toBe(2);
+    expect(page.entries.every(e => e.status === 'failed' || e.status === 'noop_persistent')).toBe(true);
+    expect(page.total).toBe(3);
   });
 
   it('all filter returns all statuses', async () => {

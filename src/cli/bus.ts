@@ -3,11 +3,12 @@ import { spawnSync, execFileSync } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { sendMessage, checkInbox, ackInbox, pruneProcessed, PROCESSED_TTL_DAYS, PROCESSED_TTL_MIN_DAYS } from '../bus/message.js';
-import { agentExists } from '../bus/agents.js';
-import { validateAgentName, isValidJson } from '../utils/validate.js';
+import { agentExists, listAgents } from '../bus/agents.js';
+import { validateAgentName, isValidJson, validateTaskId } from '../utils/validate.js';
 import { createTask, updateTask, completeTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, checkStaleTasks, archiveTasks, checkHumanTasks } from '../bus/task.js';
 import { saveOutput } from '../bus/save-output.js';
 import { logEvent } from '../bus/event.js';
+import { redactSSN } from '../utils/ssn-redaction.js';
 import { updateHeartbeat, readAllHeartbeats } from '../bus/heartbeat.js';
 import { queryCap } from '../bus/query-cap.js';
 import { selfRestart, hardRestart, autoCommit, checkGoalStaleness, postActivity } from '../bus/system.js';
@@ -30,7 +31,7 @@ import { fetchHostawayResource } from '../bus/hostaway.js';
 import { fetchTenantTurnerResource } from '../bus/tenantturner.js';
 import { fetchZinspectorResource } from '../bus/zinspector.js';
 import { checkUsageApi, refreshOAuthToken, rotateOAuth, loadAccounts, ALERT_5H, ALERT_7D } from '../bus/oauth.js';
-import { createSkillPr } from '../bus/skill-autopr.js';
+import { createSkillPr, createSkillAuditPr } from '../bus/skill-autopr.js';
 import { atomicWriteSync } from '../utils/atomic.js';
 import { resolvePaths } from '../utils/paths.js';
 import { resolveEnv } from '../utils/env.js';
@@ -45,6 +46,9 @@ import type { Priority, Task, TaskStatus, EventCategory, EventSeverity, Approval
  * Returns an error message if the transition should be blocked, or null if allowed.
  */
 function checkDeliverableRequirement(taskId: string, frameworkRoot: string, org: string, taskDir: string): string | null {
+  // Reject a traversal task id before it builds the task-file path below — this
+  // runs ahead of updateTask/completeTask, so it can't rely on findTaskFile's guard.
+  validateTaskId(taskId);
   // Read org context to check require_deliverables setting
   const contextPath = join(frameworkRoot, 'orgs', org, 'context.json');
   if (!existsSync(contextPath)) return null;
@@ -159,10 +163,28 @@ export function emitResult(result: unknown, extraFailStatuses: string[] = []): v
  */
 function resolveLintRules(): ResolvedCommsLintRules {
   const env = resolveEnv();
+  // Agent-name lint is built from the CONFIGURED org roster, never hardcoded.
+  // FAIL-SAFE floor: always seed the roster with the calling agent's OWN runtime
+  // identity (env.agentName), so an agent can NEVER leak its own name even with
+  // zero org roster (a leak-prevention lint must fail safe, not open). The org
+  // roster from listAgents layers on top. A broken roster read never crashes a
+  // send and never removes the own-identity floor.
+  const roster = new Set<string>();
+  if (typeof env.agentName === 'string' && env.agentName.length > 0) {
+    roster.add(env.agentName);
+  }
+  try {
+    for (const a of listAgents(env.ctxRoot, env.org)) {
+      if (typeof a.name === 'string' && a.name.length > 0) roster.add(a.name);
+    }
+  } catch {
+    // roster read failed — the own-identity floor above still protects.
+  }
   return resolveCommsLintRules({
     org: env.org,
     agentDir: env.agentDir,
     frameworkRoot: env.frameworkRoot,
+    roster: [...roster],
   });
 }
 
@@ -217,7 +239,7 @@ function enforceOutboundLintOrExit(
   return true;
 }
 
-// ─── Telegram-only plain-talk patterns (locked 2026-05-22 by Dane C5 dispatch) ───
+// ─── Telegram-only plain-talk patterns (locked 2026-05-22 by an agent C5 dispatch) ───
 // These fire ONLY on send-telegram (outbound to David). Agent-to-agent bus
 // comms stay technical/jargon-permissive — the patterns catch engineer-speak
 // that confuses non-technical recipients. Rule data now lives in the loader
@@ -390,6 +412,9 @@ busCommand
     const env = resolveEnv();
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
     if (!enforceOutboundLintOrExit(text, opts.skipLint, { suggest: opts.suggest })) return;
+    // SSN scrub happens at the sendMessage() primitive (src/bus/message.ts),
+    // so it covers this path AND every other inbox writer (create-task notify,
+    // notifyAgent). No per-call-site scrub needed here.
 
     // Fail loud on an unknown recipient (no orphan inbox file, no event logged)
     // BEFORE the sendMessage() side effect. --force restores warn-and-proceed
@@ -401,7 +426,7 @@ busCommand
 
     const msgId = sendMessage(paths, env.agentName, to, priority as Priority, text, effectiveReplyTo);
     try {
-      // rerouted to canonical category 2026-04-29 by collie via dane dispatch — RFC #15 schema-drift cleanup
+      // rerouted to canonical category 2026-04-29 via internal dispatch — RFC #15 schema-drift cleanup
       logEvent(paths, env.agentName, env.org, 'action', 'agent_message_sent', 'info', JSON.stringify({ to, priority, msg_id: msgId, reply_to: effectiveReplyTo ?? null }));
     } catch { /* non-fatal */ }
     console.log(msgId);
@@ -424,7 +449,7 @@ busCommand
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
     ackInbox(paths, id);
     try {
-      // rerouted to canonical category 2026-04-29 by collie via dane dispatch — RFC #15 schema-drift cleanup
+      // rerouted to canonical category 2026-04-29 via internal dispatch — RFC #15 schema-drift cleanup
       logEvent(paths, env.agentName, env.org, 'action', 'inbox_ack', 'info', JSON.stringify({ msg_id: id }));
     } catch { /* non-fatal */ }
     console.log(`ACK'd ${id}`);
@@ -1417,6 +1442,9 @@ busCommand
     // Telegram renders them as visible text. Normalize before send + log.
     message = message.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
     if (!enforceTelegramLintOrExit(message, opts.skipLint, opts.explicitNaming, { suggest: opts.suggest })) return;
+    // Layer-2 backstop: never SHARE/STORE an SSN. Scrub in-place before the
+    // send AND before logOutboundMessage / cacheLastSent / the activity event.
+    message = redactSSN(message);
     // Resolve bot token: agent .env first, then process.env
     const env = resolveEnv();
     let botToken = '';
@@ -1471,7 +1499,7 @@ busCommand
         try {
           const paths = resolvePaths(env.agentName, env.instanceId, env.org);
           const preview = message.length > 120 ? message.slice(0, 120) + '…' : message;
-          // rerouted to canonical category 2026-04-29 by collie via dane dispatch — RFC #15 schema-drift cleanup
+          // rerouted to canonical category 2026-04-29 via internal dispatch — RFC #15 schema-drift cleanup
           logEvent(paths, env.agentName, env.org, 'action', 'telegram_sent', 'info', JSON.stringify({ chat_id: chatId, message_id: sentMessageId, preview }));
         } catch { /* non-fatal */ }
       }
@@ -1600,7 +1628,11 @@ busCommand
       question,
       {
         org,
-        agent: opts.agent || env.agentName,
+        // The RUNTIME identity is authoritative for private-collection access. An
+        // explicit --agent is passed separately and must match it (queryKnowledgeBase
+        // refuses a mismatch) — a caller cannot read agent-<other> by passing --agent.
+        agent: env.agentName,
+        requestedAgent: opts.agent,
         scope: (opts.scope as 'shared' | 'private' | 'all') || 'all',
         topK: parseInt(opts.topK || '5', 10),
         threshold: parseFloat(opts.threshold || '0.5'),
@@ -2214,6 +2246,10 @@ busCommand
   .argument('<message>', 'Urgent message text')
   .option('--force', 'Signal even if the target agent does not exist (intentional pre-provisioning)', false)
   .action((targetAgent: string, message: string, opts: { force?: boolean }) => {
+    // Scrub once: this command re-implements the .urgent-signal file write
+    // inline (a second sink) AND calls sendMessage below. sendMessage scrubs
+    // its own copy, but the inline signal-file write here would otherwise leak.
+    message = redactSSN(message);
     const { mkdirSync, writeFileSync } = require('fs');
     const { join } = require('path');
     const env = resolveEnv();
@@ -2369,6 +2405,8 @@ busCommand
     // Same literal '\n'/'\t' normalize as send-telegram (codex agent fix).
     reply = reply.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
     if (!enforceOutboundLintOrExit(reply, opts?.skipLint, { suggest: opts?.suggest })) return;
+    // Layer-2 backstop: never SHARE/STORE an SSN in the mobile reply log.
+    reply = redactSSN(reply);
     const { mkdirSync, appendFileSync } = require('fs');
     const { join } = require('path');
     const env = resolveEnv();
@@ -3420,6 +3458,24 @@ busCommand
     }
   });
 
+busCommand
+  .command('create-skill-audit-pr')
+  .description('Weekly-review apply loop: commits every modified copy of a skill (templates + shared-skills + deployed) on a skill-audit/ branch and opens a draft PR against origin')
+  .argument('<skill-name>', 'Skill directory name (e.g. heartbeat, approvals)')
+  .action(async (skillName: string) => {
+    if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(skillName)) {
+      console.error(`create-skill-audit-pr: invalid skill name "${skillName}" — must be a lowercase alphanumeric slug`);
+      process.exit(1);
+    }
+    try {
+      await createSkillAuditPr(skillName);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`create-skill-audit-pr failed: ${msg}`);
+      process.exit(1);
+    }
+  });
+
 // --- Brand name command ---
 
 busCommand
@@ -3651,7 +3707,7 @@ busCommand
           // Log to event bus
           if (!opts.dryRun) {
             try {
-              // rerouted to canonical category 2026-04-29 by collie via dane dispatch — RFC #15 schema-drift cleanup
+              // rerouted to canonical category 2026-04-29 via internal dispatch — RFC #15 schema-drift cleanup
               logEvent(paths, env.agentName, env.org, 'action', 'tool_call', 'info', {
                 line: trimmed,
                 session: sessionName,
@@ -3764,7 +3820,7 @@ busCommand
     }
   });
 
-// added 2026-04-29 by collie via dane dispatch K+L+N+F batch — needs npm run build before live
+// added 2026-04-29 via internal dispatch K+L+N+F batch — needs npm run build before live
 busCommand
   .command('session-burn-so-far')
   .description('Report estimated token burn for the current session — reads inbound/outbound message logs + activity log, sums any usage fields, falls back to ~4-chars-per-token heuristic.')
@@ -3875,7 +3931,7 @@ function pct(v: number): string {
 
 busCommand
   .command('send-via-relay')
-  .description('Send an SMS or MMS reply through blue-relay (resolves bus message_id → original sender phone, supports optional MMS photo URL)')
+  .description('Send an SMS or MMS reply through the relay agent (resolves bus message_id → original sender phone, supports optional MMS photo URL)')
   .requiredOption('--to <target>', 'Bus message_id (relay resolves to sender phone) or E.164 phone (with +)')
   .requiredOption('--text <text>', 'Reply text body')
   .option('--photo <url>', 'Optional pre-signed photo URL for MMS attachment')

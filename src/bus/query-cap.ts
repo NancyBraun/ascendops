@@ -1,7 +1,7 @@
 // Bus subcommand: query-cap
 // Surfaces a real CapReadout (headers > dashboard > estimate) so agents stop
 // guessing usage cap state from heuristics. Closes the heuristic-vs-data gap
-// caught 2026-05-18 when Collie self-estimated 75-85% but actual was 11%/3%.
+// caught 2026-05-18 when an agent self-estimated 75-85% but actual was 11%/3%.
 
 import { getCurrentCap, type CapReadout } from './cap-readout.js';
 

@@ -11,10 +11,10 @@ PM platform credentials are stored separately:
 - PropertyMeld: `MELD_CLIENT_ID` / `MELD_CLIENT_SECRET` env vars
 
 ## Org Structure
-- Orchestrator: `dane` (or your orchestrator agent name)
+- Orchestrator: `an agent` (or your orchestrator agent name)
 - This agent reports to the orchestrator for task assignment
 - Files upstream PRs to `grandamenium/cortextos` for framework changes
-- Files adapter PRs to `your-pm-adapter-repo` for adapter changes
+- Files adapter PRs to `noogalabs/snapcli` for adapter changes
 
 ## Key Paths
 - cortextos framework: `~/cortextos/`

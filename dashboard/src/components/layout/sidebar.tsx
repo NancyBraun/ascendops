@@ -6,6 +6,7 @@ import { useOrg } from '@/hooks/use-org';
 import { useBrand } from '@/hooks/use-brand';
 import {
   IconLayoutDashboard,
+  IconActivityHeartbeat,
   IconRobot,
   IconListCheck,
   IconShieldCheck,
@@ -20,10 +21,28 @@ import {
   IconTarget,
   IconMessages,
   IconNotes,
+  IconHeadset,
+  IconTool,
+  IconKey,
+  IconChartBar,
+  IconCode,
+  IconCash,
+  IconChecklist,
 } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { DEPARTMENTS } from '@/lib/departments';
+
+// Department slug -> nav icon
+const deptIcons: Record<string, NavItem['icon']> = {
+  operations: IconHeadset,
+  maintenance: IconTool,
+  leasing: IconKey,
+  analytics: IconChartBar,
+  dev: IconCode,
+  accounting: IconCash,
+};
 
 interface NavItem {
   label: string;
@@ -33,17 +52,30 @@ interface NavItem {
   section?: string;
 }
 
+// Department nav items, generated from the department map
+const departmentItems: NavItem[] = DEPARTMENTS.map((d) => ({
+  label: d.label,
+  href: `/departments/${d.slug}`,
+  icon: deptIcons[d.slug] ?? IconRobot,
+  section: 'departments',
+}));
+
 const navItems: NavItem[] = [
   // Core
   { label: 'Overview', href: '/', icon: IconLayoutDashboard, section: 'core' },
+  { label: 'Pulse', href: '/pulse', icon: IconActivityHeartbeat, section: 'core' },
   { label: 'Agents', href: '/agents', icon: IconRobot, section: 'core' },
   { label: 'Tasks', href: '/tasks', icon: IconListCheck, section: 'core' },
   { label: 'Activity', href: '/activity', icon: IconActivity, section: 'core' },
 
+  // Departments (the cockpit layer)
+  ...departmentItems,
+
   // Operations
   { label: 'Comms', href: '/comms', icon: IconMessages, section: 'ops' },
   { label: 'Approvals', href: '/approvals', icon: IconShieldCheck, section: 'ops' },
-  { label: 'Workflows', href: '/workflows', icon: IconClock, section: 'ops' },
+  { label: 'SOP Library', href: '/sops', icon: IconChecklist, section: 'ops' },
+  { label: 'Scheduled Jobs', href: '/workflows', icon: IconClock, section: 'ops' },
   { label: 'Strategy', href: '/strategy', icon: IconTarget, section: 'ops' },
   { label: 'Analytics', href: '/analytics', icon: IconChartDots3, section: 'ops' },
 
@@ -56,6 +88,7 @@ const navItems: NavItem[] = [
 
 const sectionLabels: Record<string, string> = {
   core: '',
+  departments: 'Departments',
   ops: 'Operations',
   intel: 'Intelligence',
 };
@@ -98,7 +131,7 @@ export function Sidebar({
   }
 
   // Group items by section
-  const sections = ['core', 'ops', 'intel'];
+  const sections = ['core', 'departments', 'ops', 'intel'];
 
   return (
     <aside className="flex h-screen w-56 shrink-0 flex-col border-r bg-card/50">

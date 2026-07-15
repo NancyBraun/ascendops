@@ -3,7 +3,8 @@ import { join } from 'path';
 import type { Task, Priority, TaskStatus, BusPaths, StaleTaskReport, ArchiveReport } from '../types/index.js';
 import { atomicWriteSync, ensureDir } from '../utils/atomic.js';
 import { randomDigits } from '../utils/random.js';
-import { validatePriority } from '../utils/validate.js';
+import { validatePriority, validateTaskId } from '../utils/validate.js';
+import { redactSSN } from '../utils/ssn-redaction.js';
 import { logEvent } from './event.js';
 
 /**
@@ -38,6 +39,12 @@ export function createTask(
 
   validatePriority(priority);
 
+  // Reassign the scrubbed title ONCE, up front — so EVERY sink reads it: the
+  // task JSON object AND the appendTaskAudit `note: title` below (a sibling
+  // sink that references the variable, not the object field). `description` is
+  // a destructured const (not in any audit) — scrubbed at the object instead.
+  title = redactSSN(title);
+
   const epoch = Date.now();
   // 8 digits: same-millisecond collision probability is ~1e-8 instead of ~1e-3.
   // Two createTask calls in the same ms with a 3-digit suffix collided in CI
@@ -54,6 +61,17 @@ export function createTask(
   // Order is now: validate → write task → mutate peers → audit. The
   // cycle walker gets a `virtual` description of the not-yet-written
   // task so chains that pass through it are still detectable.
+  // Format-validate the blocks downIds BEFORE any task file is written.
+  // blocked_by ids are validated implicitly — detectCycleOrThrow walks them and
+  // findTaskFile() calls validateTaskId() — but a blocks downId is only ever the
+  // cycle *target* (compared, never walked), so an invalid downId would slip past
+  // the cycle check, the new task would be persisted, and addSymmetricEdge() would
+  // then throw in findTaskFile() — leaving an orphan task file on disk
+  // (data-integrity / orphan-on-failure). Validate up front so a bad downId writes
+  // ZERO files. Format-only: a valid-but-missing downId stays a permitted dangling
+  // ref, matching blocked_by (which has no existence check).
+  for (const downId of blocks) validateTaskId(downId);
+
   const virtualTask = { id: taskId, blocked_by: blockedBy };
   if (blockedBy.length) detectCycleOrThrow(paths, taskId, blockedBy, virtualTask);
   if (blocks.length) {
@@ -62,8 +80,8 @@ export function createTask(
 
   const task: Task = {
     id: taskId,
-    title,
-    description,
+    title, // already scrubbed up front (also used by the audit note)
+    description: redactSSN(description),
     type: 'agent',
     needs_approval: needsApproval,
     status: 'pending',
@@ -221,6 +239,9 @@ export function checkTaskDependencies(
  * task-graph visualization, or cross-org list-tasks flag).
  */
 export function findTaskFile(paths: BusPaths, taskId: string): string | null {
+  // Reject path-traversal task ids before they reach any join() below. This is
+  // the chokepoint for updateTask/claimTask/completeTask/checkTaskDependencies.
+  validateTaskId(taskId);
   // Fast path: same-org lookup.
   const sameOrg = join(paths.taskDir, `${taskId}.json`);
   if (existsSync(sameOrg)) return sameOrg;
@@ -388,7 +409,9 @@ export function updateTask(
     agent: newAssignee ?? prevAssignee ?? 'unknown',
     from: prevStatus,
     to: status,
-    note,
+    // Audit-log sink: the note embeds a free-text claimNote that could carry
+    // connector data — scrub before it is persisted to the audit JSONL.
+    note: note !== undefined ? redactSSN(note) : undefined,
   });
 }
 
@@ -421,6 +444,9 @@ export function appendTaskAudit(
   taskId: string,
   entry: Omit<TaskAuditEntry, 'ts'>,
 ): void {
+  // Validate before the try so a traversal id is rejected loudly rather than
+  // swallowed by the audit-never-blocks catch below.
+  validateTaskId(taskId);
   try {
     const auditDir = join(paths.taskDir, 'audit');
     ensureDir(auditDir);
@@ -444,6 +470,7 @@ export function readTaskAudit(
   paths: BusPaths,
   taskId: string,
 ): TaskAuditEntry[] {
+  validateTaskId(taskId);
   const path = join(paths.taskDir, 'audit', `${taskId}.jsonl`);
   if (!existsSync(path)) return [];
   const entries: TaskAuditEntry[] = [];
@@ -565,6 +592,10 @@ export function completeTask(
   taskId: string,
   result?: string,
 ): void {
+  // Scrub at source: `result` is a free-text completion summary (--result) that
+  // can carry PM connector data. Reassigning here covers BOTH sinks — task.result
+  // in the JSON object AND the appendTaskAudit `note: result` below.
+  if (result !== undefined) result = redactSSN(result);
   const filePath = findTaskFile(paths, taskId);
   if (!filePath) {
     throw new Error(
@@ -794,6 +825,9 @@ export function archiveTasks(paths: BusPaths, dryRun: boolean = false): ArchiveR
     const age = nowEpoch - completedEpoch;
 
     if (age > ARCHIVE_AGE) {
+      // task.id comes from the file's JSON body and is used to build the
+      // rename source/dest below; a tampered id must not escape the task tree.
+      try { validateTaskId(task.id); } catch { skipped++; continue; }
       if (!dryRun) {
         const archiveDir = join(paths.taskDir, 'archive');
         ensureDir(archiveDir);
@@ -901,7 +935,18 @@ export function compactTasks(
       continue;
     }
 
+    // task.id (from the file's JSON body) is used to unlink the source file
+    // below; a tampered id must not delete a file outside the task tree.
+    try { validateTaskId(task.id); } catch { report.skipped.push({ id: String(task.id), reason: 'invalid task id (path-traversal guard)' }); continue; }
+
     const yyyymm = task.completed_at.substring(0, 7); // YYYY-MM
+    // completed_at is from the JSON body and feeds the archive filename below;
+    // reject anything that isn't a literal YYYY-MM so a tampered timestamp can't
+    // traverse out of the task tree via the archive path.
+    if (!/^\d{4}-\d{2}$/.test(yyyymm)) {
+      report.skipped.push({ id: String(task.id), reason: 'invalid completed_at (path-traversal guard)' });
+      continue;
+    }
     const archiveFile = `archive-${yyyymm}.jsonl`;
     const archivePath = join(taskDir, archiveFile);
     const entry = {

@@ -1,7 +1,7 @@
 # Cron Source-of-Truth Contract
 
 **Status:** load-bearing — load before editing any cron config or daemon scheduler code
-**Authored:** 2026-05-11 (your analyst, post root-cause investigation of cron-prompt-cache bug)
+**Authored:** 2026-05-11 (an agent, post root-cause investigation of cron-prompt-cache bug)
 **Related code:** `src/daemon/cron-scheduler.ts`, `src/daemon/cron-migration.ts`, `src/bus/crons.ts`
 
 ## TL;DR
@@ -23,9 +23,9 @@ Two files hold cron data. They are **not symmetric**. Editing one without propag
 
 Operator edits a cron prompt or schedule in `config.json` expecting next fire to use the new value. Daemon continues firing the old value from `crons.json`. No error surfaces — fires complete normally with stale text.
 
-**Concrete examples observed in your analyst's state on 2026-05-11 (pre-fix):**
-- `skill-optimizer` prompt: `config.json` had morning-review dropped per a config-vs-state cron decision. `crons.json` still had the OLD prompt referencing morning-review. Cron fired 2026-05-11 13:33 UTC using the stale prompt.
-- `skill-optimizer` schedule: `config.json` `33 9 * * 1` (weekly Monday per a config-vs-state cron decision). `crons.json` `33 9 * * 1-5` (daily weekdays). Daemon scheduled per the OLD weekday cadence.
+**Concrete examples observed in an agent's state on 2026-05-11 (pre-fix):**
+- `skill-optimizer` prompt: `config.json` had morning-review dropped per operator feedback F1 (2026-05-10). `crons.json` still had the OLD prompt referencing morning-review. Cron fired 2026-05-11 13:33 UTC using the stale prompt.
+- `skill-optimizer` schedule: `config.json` `33 9 * * 1` (weekly Monday per an agent F4). `crons.json` `33 9 * * 1-5` (daily weekdays). Daemon scheduled per the OLD weekday cadence.
 - `pm-colocated-detect`: new cron added to `config.json` 2026-05-11. **NEVER added to `crons.json`.** Would have silently no-opped tomorrow's 07:15 EDT first-fire.
 
 ## Edit contract
@@ -40,7 +40,7 @@ Operator edits a cron prompt or schedule in `config.json` expecting next fire to
 ### Updating a cron prompt or schedule
 1. Edit `config.json:crons[<name>].prompt` (or `cron`/`interval`).
 2. Run `cortextos bus update-cron <agent> <name> --prompt "..."` (surgical) OR `reload-crons <agent>` (bulk re-sync).
-3. After your dev agent's daemon-side cache-invalidation PR lands: next fire uses fresh data automatically. Without that PR: a process-level signal (SIGHUP-style) or daemon restart is required to invalidate the in-memory cache.
+3. After an agent's daemon-side cache-invalidation PR lands: next fire uses fresh data automatically. Without that PR: a process-level signal (SIGHUP-style) or daemon restart is required to invalidate the in-memory cache.
 
 ### Removing a cron
 1. Remove entry from `config.json:crons[]`.
@@ -68,7 +68,7 @@ Operator edits a cron prompt or schedule in `config.json` expecting next fire to
 
 **Do NOT use for routine config.json edit propagation.** Use `reload-crons` (merge-aware) instead.
 
-Observed 2026-05-11 during outage fix: your analyst heartbeat went `fire_count=63 → 0`, `last_fired_at=2026-05-12T02:13:20Z → null` from a single `migrate-crons --force` call. Restored from backup manually.
+Observed 2026-05-11 during outage fix: an agent heartbeat went `fire_count=63 → 0`, `last_fired_at=2026-05-12T02:13:20Z → null` from a single `migrate-crons --force` call. Restored from backup manually.
 
 ## `reload-crons` design (PR-TBD)
 
@@ -92,7 +92,7 @@ for each name in crons.json NOT in config.json:
         keep as-is in staged crons.json (DEFAULT — orphan tolerated)
 
 atomic write staged crons.json
-emit reload event for daemon cache invalidation (consumed by your dev agent's PR)
+emit reload event for daemon cache invalidation (consumed by an agent's PR)
 ```
 
 **Runtime fields to preserve (from existing state entry):**
@@ -123,7 +123,7 @@ Orphans = entries in `crons.json` that have NO matching name in `config.json:cro
 
 **Destructive-op pattern (carryover from `migrate-crons --force` finding):** all destructive operations require explicit opt-in flag. Default behavior never destroys state.
 
-## Two-stage pipeline (with your dev agent's daemon-side PR)
+## Two-stage pipeline (with an agent's daemon-side PR)
 
 ```
 operator edits orgs/<org>/agents/<agent>/config.json
@@ -136,12 +136,12 @@ reload-crons merges: config wins for definition fields, state wins for runtime f
         ↓
 reload-crons atomic-writes state crons.json + emits reload signal
         ↓
-daemon CronScheduler.reload() (your dev agent's PR) detects signal → re-reads crons.json → invalidates in-memory cache
+daemon CronScheduler.reload() (an agent's PR) detects signal → re-reads crons.json → invalidates in-memory cache
         ↓
 next fire uses fresh prompt + schedule
 ```
 
-**Hook-point for your dev agent's PR:** the reload signal. Options:
+**Hook-point for an agent's PR:** the reload signal. Options:
 - Write a sentinel file `state/agents/<agent>/.reload-requested` (daemon polls).
 - IPC message to daemon via existing `daemon.sock`.
 - `process.kill(daemonPid, 'SIGUSR1')` — Unix signal.
@@ -150,16 +150,16 @@ Recommend IPC over the existing socket — clean integration with daemon's tick 
 
 ## Open work items (post-PR)
 
-1. `bus reload-crons` PR (your analyst owns).
-2. Daemon-side cache invalidation PR (your dev agent owns).
+1. `bus reload-crons` PR (an agent owns).
+2. Daemon-side cache invalidation PR (an agent owns).
 3. Per-agent `enabled-agents.json` interaction — currently `migrate-crons` skips disabled agents; verify `reload-crons` honors the same gate.
 4. Atomic-write race testing: two concurrent `reload-crons` invocations against the same agent.
 
 ## Reference
 
-- Bug discovery: your analyst skill-optimizer cron audit 2026-05-11 — flagged that config.json edits didn't propagate.
-- Dispatch: your dev agent dispatched — split bug fix into your analyst (source-of-truth + reload-crons) + your dev agent (daemon cache invalidation).
-- Outage fix: your analyst 2026-05-11 ~20:47 UTC — pre-empted tomorrow's 07:15 pm-colocated-detect silent-no-op via `migrate-crons --force` + manual runtime-field restore.
+- Bug discovery: an agent skill-optimizer cron audit 2026-05-11 — flagged that config.json edits didn't propagate.
+- Dispatch: an agent msg 1778553788320 — split bug fix into an agent (source-of-truth + reload-crons) + an agent (daemon cache invalidation).
+- Outage fix: an agent 2026-05-11 ~20:47 UTC — pre-empted tomorrow's 07:15 pm-colocated-detect silent-no-op via `migrate-crons --force` + manual runtime-field restore.
 
 ## Follow-up backlog (post-`reload-crons`-PR)
 

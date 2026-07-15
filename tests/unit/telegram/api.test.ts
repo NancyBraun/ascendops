@@ -37,6 +37,27 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe('TelegramAPI SSN redaction', () => {
+  it('scrubs SSNs from reply_markup button labels (AskUserQuestion inline keyboard)', async () => {
+    queue({ status: 200, body: { ok: true, result: { message_id: 1 } } });
+    const api = new TelegramAPI('111:AAA');
+    await api.sendMessage('222', 'Pick one', {
+      inline_keyboard: [[{ text: 'Tenant 123-45-6789', callback_data: 'opt1' }]],
+    });
+    const markup = JSON.stringify(callLog[0].body.reply_markup);
+    expect(markup).toContain('[REDACTED-SSN]');
+    expect(markup).not.toContain('123-45-6789');
+  });
+
+  it('scrubs SSNs from the message text', async () => {
+    queue({ status: 200, body: { ok: true, result: { message_id: 1 } } });
+    const api = new TelegramAPI('111:AAA');
+    await api.sendMessage('222', 'tenant SSN 123-45-6789 on file');
+    expect(String(callLog[0].body.text)).toContain('[REDACTED-SSN]');
+    expect(String(callLog[0].body.text)).not.toContain('123-45-6789');
+  });
+});
+
 describe('TelegramAPI.validateCredentials', () => {
   it('happy path: valid token + reachable user chat returns ok=true', async () => {
     queue({ status: 200, body: { ok: true, result: { id: 111, username: 'my_test_bot' } } });

@@ -1,5 +1,9 @@
 local/
 .env
-memory/
 *.log
 .cache/
+memory/
+!knowledge/archive/
+!knowledge/archive/**/*.md
+node_modules/
+.DS_Store

@@ -335,7 +335,11 @@ def describe_media(client, config, file_path, media_type="video"):
     )
     if _tracker:
         _tracker.track_generation(response)
-    return response.text, data, mime
+    # Scrub the Gemini transcription/description at the source so EVERY media
+    # ingest path (image/video/audio) persists and embeds redacted text — this
+    # closes the scanned-SSN-document path (an SSN visible in a PDF/image that
+    # Gemini transcribes). The embedding is computed on the scrubbed text too.
+    return scrub_ssn(response.text), data, mime
 
 # ---------------------------------------------------------------------------
 # ChromaDB
@@ -354,10 +358,267 @@ def get_chroma_client():
     return chromadb.PersistentClient(path=str(CHROMADB_DIR))
 
 # ---------------------------------------------------------------------------
+# PII (SSN) redaction — persistence-point scrub
+#
+# Mirror of src/utils/ssn-redaction.ts (the canonical redactor used by the
+# PTY / event / bus layers). Enforced HERE because KB ingest passes file PATHS
+# to this tool, which reads/transcribes each file and embeds the text — this is
+# the only point where the FINAL text (including the Gemini transcription of a
+# binary, e.g. a scanned SSN doc) exists in-process before it is persisted to
+# ChromaDB. Scrubbing here preserves the original source path (shared-collection
+# allowlist, provenance, dedup, delete-by-path all keep working), covers
+# directory inputs and media alike, and has no read/scrub TOCTOU.
+#
+# Fail-CLOSED: scrub_ssn is pure and raises only on a programming error; that
+# error is allowed to propagate and abort the ingest. Raw text is NEVER
+# embedded as a fallback. Keep this pattern set in sync with ssn-redaction.ts.
+# ---------------------------------------------------------------------------
+import re as _re
+
+SSN_PLACEHOLDER = "[REDACTED-SSN]"
+# Formatted-SSN separator — parity with SSN_SEP in ssn-redaction.ts: ASCII
+# dash/dot/tab/space PLUS the Unicode Zs horizontal spaces (NBSP, figure, narrow,
+# thin, ideographic, ...) so an SSN typed with a non-ASCII space is caught.
+# Line/para separators excluded (like newline).
+_SSN_SEP = r"[-.\t \u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]"
+# re.ASCII on the DIGIT/BOUNDARY patterns pins \b (and \w, \d) to ASCII so they
+# match JS exactly. JS \b is ASCII-word-based while Python \b is Unicode-aware,
+# so without this a letter-adjacent SSN (`café123-45-6789`) is redacted by JS
+# (é is non-word in ASCII → the boundary fires) but LEAKED by Python (é is a
+# Unicode word char → no boundary) — a real divergence at the KB-ingest sink.
+# [0-9] is kept explicit (US SSNs are ASCII digits; Unicode digit scripts are an
+# accepted boundary). re.ASCII is applied ONLY here, NOT to the label patterns
+# below: JS \s IS Unicode-aware (matches NBSP), so the labels must keep Unicode
+# \s to stay in parity. SSN_SEP is explicit codepoints, untouched by re.ASCII.
+# Invisible / format chars (Unicode \p{Cf} + \p{Default_Ignorable_Code_Point})
+# tolerated BETWEEN an SSN's digits, mirroring INVIS in ssn-redaction.ts. Python
+# `re` has no \p{}, so this codepoint set is GENERATED from the JS class
+# /[\p{Cf}\p{Default_Ignorable_Code_Point}]/u (node) and pinned char-for-char by
+# the drift-guard test — NOT hand-maintained. Handled IN-PATTERN (matched as part
+# of the SSN span, redacted with it), NOT stripped from output, so a legit
+# load-bearing ZWJ/ZWNJ in Indic text or an emoji sequence elsewhere stays
+# byte-identical. INVIS and [0-9] are disjoint → no catastrophic backtracking.
+_INVIS_RANGES = [
+    (0xAD, 0xAD), (0x34F, 0x34F), (0x600, 0x605), (0x61C, 0x61C), (0x6DD, 0x6DD),
+    (0x70F, 0x70F), (0x890, 0x891), (0x8E2, 0x8E2), (0x115F, 0x1160), (0x17B4, 0x17B5),
+    (0x180B, 0x180F), (0x200B, 0x200F), (0x202A, 0x202E), (0x2060, 0x206F), (0x3164, 0x3164),
+    (0xFE00, 0xFE0F), (0xFEFF, 0xFEFF), (0xFFA0, 0xFFA0), (0xFFF0, 0xFFFB), (0x110BD, 0x110BD),
+    (0x110CD, 0x110CD), (0x13430, 0x1343F), (0x1BCA0, 0x1BCA3), (0x1D173, 0x1D17A), (0xE0000, 0xE0FFF),
+]
+def _u(cp):
+    # Emit a regex \uXXXX / \UXXXXXXXX ESCAPE (text), not the literal codepoint —
+    # building the class from literal invisible/bidi chars both pollutes the source
+    # and miscompiles (a literal bidi codepoint corrupts the class parse).
+    return ("\\u%04x" % cp) if cp <= 0xFFFF else ("\\U%08x" % cp)
+
+
+_INVIS = "[" + "".join(_u(lo) if lo == hi else _u(lo) + "-" + _u(hi) for lo, hi in _INVIS_RANGES) + "]*"
+
+
+def _ssn_digits(n):
+    """`n` ASCII digits with optional invisibles interleaved between them."""
+    return "[0-9]" + ("(?:" + _INVIS + "[0-9])") * (n - 1)
+
+
+# Each group stays EXACTLY 3/2/4 VISIBLE digits (INVIS adds no digit), so the
+# 3-2-4 shape never loosens into a 3-3-4 phone.
+# Boundary anchors: digit-only negative lookbehind/lookahead, NOT \b — mirrors
+# SSN_LEAD/SSN_TRAIL in ssn-redaction.ts, so an SSN glued to a letter/underscore
+# is found while a 10+-digit run has no sub-9. Python lookbehind is fixed-width
+# (digit-only qualifies) = JS parity. NOT digit-or-dash (a dash would make
+# `ssn-123-45-6789` survive). re.ASCII keeps \b/\d ASCII elsewhere.
+_SSN_LEAD = r"(?<![0-9])"
+_SSN_TRAIL = r"(?![0-9])"
+_SSN_FORMATTED = _re.compile(
+    _SSN_LEAD + _ssn_digits(3) + _INVIS + _SSN_SEP + _INVIS + _ssn_digits(2)
+    + _INVIS + _SSN_SEP + _INVIS + _ssn_digits(4) + _SSN_TRAIL,
+    _re.ASCII,
+)
+_SSN_NINE = _re.compile(_SSN_LEAD + r"[0-9](?:" + _INVIS + r"[0-9]){8}" + _SSN_TRAIL, _re.ASCII)
+# Label-internal separator — MIRRORS LABEL_SEP in ssn-redaction.ts. NOT \s: JS \s
+# and python \s are INCOMPARABLE (JS has U+FEFF; python has U+0085/NEL + U+1C-1F),
+# so a \s label would redact social<FEFF>security in JS but LEAK it in this python
+# KB sink (and vice-versa for NEL). LABEL_SEP is the UNION of JS \s ∪ python \s +
+# underscore — a superset of both, identical on both runtimes — pinned to
+# tests/fixtures/label-sep-ranges.json (drift-guard asserts live python \s ⊆ it).
+# re.ASCII pins the label case-fold to ASCII (= JS /i; neither folds ſ→s): after
+# [\s_]→LABEL_SEP the label has no \s/\w/\b/\d, so re.ASCII only affects case-fold
+# (the [\s\S]{0,16} gap stays any-char). Mirrors the JS label patterns exactly.
+_LABEL_SEP = (
+    "[\\u0009-\\u000d\\u001c-\\u0020\\u002d\\u005f\\u0085\\u00a0\\u1680"
+    "\\u2000-\\u200a\\u2028-\\u2029\\u202f\\u205f\\u3000\\ufeff]"
+)
+_LABEL_ALT = r"(?:ssn|social" + _LABEL_SEP + r"+security|tax" + _LABEL_SEP + r"*id)"
+_SSN_LABEL = _re.compile(_LABEL_ALT, _re.IGNORECASE | _re.ASCII)
+# In-text promotion keyed on the label END within _SSN_GAP chars of the number,
+# over an _SSN_LOOKBACK window — parity with ssn-redaction.ts. Anchoring on the
+# label END lets a long label ("social security number") promote; the tight GAP
+# keeps a label for ANOTHER nearby number from bleeding across.
+_SSN_GAP = 16
+_SSN_LOOKBACK = 40
+# [\s\S]{0,16} (not .{0,16}) so the label<->number gap may span a NEWLINE — a
+# label on the adjacent line still promotes (SSN:\n987654321 / pretty-JSON).
+# GAP only; the formatted separator stays horizontal so 123\n45\n6789 is safe.
+_SSN_LABEL_BEFORE = _re.compile(_LABEL_ALT + r"[\s\S]{0,16}$", _re.IGNORECASE | _re.ASCII)
+_SSN_LABEL_AFTER = _re.compile(r"^[\s\S]{0,16}" + _LABEL_ALT, _re.IGNORECASE | _re.ASCII)
+
+# ---------------------------------------------------------------------------
+# PII v2 milestone-2 — EIN, routing number, bank account. Direct ports of the
+# canonical TS registry entries (src/utils/ssn-redaction.ts). Same primitives
+# (_SSN_SEP, _INVIS, _SSN_LEAD/_SSN_TRAIL, _LABEL_SEP, _SSN_GAP/_LOOKBACK), same
+# label sets, same registry ORDER (SSN > EIN > ROUTING > BANK_ACCT). re.ASCII on
+# the digit/boundary patterns keeps \b/\d ASCII = JS parity; label patterns keep
+# Unicode \s. No streaming/chunk path needed (mmrag has no holdback infra).
+# ---------------------------------------------------------------------------
+EIN_PLACEHOLDER = "[REDACTED-EIN]"
+ROUTING_PLACEHOLDER = "[REDACTED-ROUTING]"
+BANK_ACCT_PLACEHOLDER = "[REDACTED-BANK-ACCT]"
+
+# Formatted EIN \d{2}<sep>\d{7} — 2-7 shape, unambiguous vs SSN 3-2-4.
+_EIN_FORMATTED = _re.compile(
+    _SSN_LEAD + _ssn_digits(2) + _INVIS + _SSN_SEP + _INVIS + _ssn_digits(7) + _SSN_TRAIL,
+    _re.ASCII,
+)
+# Bank-account candidate: 4-17 digit run (3-16 repeats of the trailing digit).
+_BANK_RANGE = _re.compile(_SSN_LEAD + r"[0-9](?:" + _INVIS + r"[0-9]){3,16}" + _SSN_TRAIL, _re.ASCII)
+
+# EIN label set: ein, fein, employer identification, employer id, federal tax id
+# (tax id stays SSN-only). Routing: routing, aba (catch the multi-word forms as
+# substrings). Bank: bank account, account number, bank acct. Same _LABEL_SEP +
+# IGNORECASE|ASCII discipline as the SSN labels (Unicode \s NOT used — _LABEL_SEP
+# is the explicit JS∪python union).
+# SNAKE_CASE / JSON keys (F5 audit, structural fix): \b treats `_` AND digits as
+# word chars, so bare \bein\b/\bfein\b MISSED `ein_number`/`ein_value` snake_case
+# keys (would leak the EIN raw). Switching the in-text boundary to LETTER-CLASS
+# (?<![a-z])…(?![a-z]) treats `_`/digits as boundaries, so the bare ein/fein roots
+# now match both `ein number` and `ein_number`/`ein_value` — no explicit
+# ein<SEP>+number form needed (redundant once the boundary stopped being \b).
+# Mirrors TS EIN_LABEL_ALT exactly.
+_EIN_LABEL_ALT = (
+    r"(?:fein|ein|employer"
+    + _LABEL_SEP + r"+identification|employer" + _LABEL_SEP
+    + r"+id|federal" + _LABEL_SEP + r"+tax" + _LABEL_SEP + r"*id)"
+)
+_EIN_LABEL = _re.compile(_EIN_LABEL_ALT, _re.IGNORECASE | _re.ASCII)
+# LETTER-CLASS boundary in-text matchers (?<![a-z])…(?![a-z]), NOT \b: `ein`/
+# `fein` are common substrings (protein, vein, caffeine) — a letter on the
+# boundary still excludes them, while `_`/digits are boundaries so snake_case
+# keys match. ASCII fixed-width lookbehind (re.ASCII) matches the JS `(?<![a-z])`
+# (no `u` flag) for parity. The labelHint predicate (_EIN_LABEL) stays unanchored.
+_EIN_LABEL_BEFORE = _re.compile(r"(?<![a-z])" + _EIN_LABEL_ALT + r"(?![a-z])[\s\S]{0,16}$", _re.IGNORECASE | _re.ASCII)
+_EIN_LABEL_AFTER = _re.compile(r"^[\s\S]{0,16}(?<![a-z])" + _EIN_LABEL_ALT + r"(?![a-z])", _re.IGNORECASE | _re.ASCII)
+
+# ROUTING is ASYMMETRIC (unlike EIN/bank). SNAKE_CASE / JSON keys (F5, structural
+# fix): leading (?<![a-z]) (letter-only) admits `{"routing_number`/`aba_routing`;
+# trailing (?![a-z0-9_]) (= \b-trailing) so the BARE `routing` root matches
+# `routing `/`routing transit`/`routing number` but NOT `routing_table`/
+# `routing_protocol` (networking FP guard — `_` is a letter-boundary, so a pure
+# (?![a-z]) trailing would false-redact those). The legit `routing_number` LABEL is
+# caught by the EXPLICIT routing<SEP>+number / aba<SEP>+routing alternatives (listed
+# first), whose trailing boundary sits after `number`/`routing` (space/value). The
+# discriminator is the WORD AFTER routing, not the boundary. Mirrors TS exactly.
+_ROUTING_LABEL_ALT = (
+    r"(?:routing" + _LABEL_SEP + r"+number|aba" + _LABEL_SEP + r"+routing|routing|aba)"
+)
+_ROUTING_LABEL = _re.compile(_ROUTING_LABEL_ALT, _re.IGNORECASE | _re.ASCII)
+# Asymmetric boundary (?<![a-z])…(?![a-z0-9_]): leading letter-only, trailing
+# word-char-excluding (see ALT comment). labelHint predicate stays unanchored.
+_ROUTING_LABEL_BEFORE = _re.compile(r"(?<![a-z])" + _ROUTING_LABEL_ALT + r"(?![a-z0-9_])[\s\S]{0,16}$", _re.IGNORECASE | _re.ASCII)
+_ROUTING_LABEL_AFTER = _re.compile(r"^[\s\S]{0,16}(?<![a-z])" + _ROUTING_LABEL_ALT + r"(?![a-z0-9_])", _re.IGNORECASE | _re.ASCII)
+
+_BANK_LABEL_ALT = (
+    r"(?:bank" + _LABEL_SEP + r"+account|account" + _LABEL_SEP + r"+number|bank" + _LABEL_SEP + r"+acct)"
+)
+_BANK_LABEL = _re.compile(_BANK_LABEL_ALT, _re.IGNORECASE | _re.ASCII)
+# LETTER-CLASS boundary (?<![a-z])…(?![a-z]), NOT \b: treats `_`/digits as
+# boundaries so the snake_case key `bank_account_number` matches (the
+# `account_number` form fires across the `_`) while `embankment` (letter-glued)
+# stays excluded. Mirrors TS BANK_LABEL_BEFORE/AFTER.
+_BANK_LABEL_BEFORE = _re.compile(r"(?<![a-z])" + _BANK_LABEL_ALT + r"(?![a-z])[\s\S]{0,16}$", _re.IGNORECASE | _re.ASCII)
+_BANK_LABEL_AFTER = _re.compile(r"^[\s\S]{0,16}(?<![a-z])" + _BANK_LABEL_ALT + r"(?![a-z])", _re.IGNORECASE | _re.ASCII)
+
+
+def scrub_ssn(text, aggressive=None):
+    """Replace every SSN in ``text`` with ``[REDACTED-SSN]``.
+
+    PII v2 milestone-1: the CANONICAL live PII-pattern registry lives in
+    ``src/utils/ssn-redaction.ts`` (``redactSSN`` iterates ``PII_REGISTRY``).
+    This python ``scrub_ssn`` is a deliberately LIGHTER behavior-parity MIRROR
+    (no registry class in m1); its observable behavior must stay byte-identical
+    to the canonical SSN entry so the differential parity fuzz stays 0-divergence.
+
+
+    Conservative by default: formatted ``\\d{3}[-.\\t ]\\d{2}[-.\\t ]\\d{4}``
+    (dash/dot/tab/space, HORIZONTAL only — no newline; \\b boundaries keep a
+    10-digit phone from matching) plus a context-keyed bare-9 run (within ~20
+    chars of an ``ssn`` / ``social security`` / ``tax id`` label, either
+    direction). Aggressive mode (any bare 9-digit run) is opt-in via
+    ``SSN_REDACT_AGGRESSIVE=1``. Mirrors ``redactSSN`` in
+    src/utils/ssn-redaction.ts.
+    """
+    if not text:
+        return text
+    if aggressive is None:
+        aggressive = os.environ.get("SSN_REDACT_AGGRESSIVE") == "1"
+
+    def _make_repl(placeholder, label_before, label_after, short_circuit_aggressive):
+        """Build a Pass-1 conservative callback for one registry entry. Mirrors
+        makeLabelKeyedConservativeMatcher / makeSsnConservativeMatcher in the TS.
+        short_circuit_aggressive: SSN/EIN/routing redact unconditionally in
+        aggressive mode; bank-acct does NOT (label-required in all modes)."""
+        def _repl(m):
+            if short_circuit_aggressive and aggressive:
+                return placeholder
+            s = m.string
+            # Neutralize THIS entry's placeholder to a SAME-LENGTH run so its
+            # literal text never promotes a nearby number (idempotency under
+            # double-scrub) AND offsets are preserved. Mirrors ssn-redaction.ts.
+            neutral = " " * len(placeholder)
+            before = s[max(0, m.start() - _SSN_LOOKBACK):m.start()].replace(placeholder, neutral)
+            after = s[m.end():m.end() + _SSN_LOOKBACK].replace(placeholder, neutral)
+            if label_before.search(before) or label_after.search(after):
+                return placeholder
+            return m.group(0)
+        return _repl
+
+    # Registry order is LOAD-BEARING and mirrors PII_REGISTRY exactly:
+    # SSN > EIN > ROUTING > BANK_ACCT. Each entry runs Pass-1 (bare-run/candidate
+    # + conservative callback) then Pass-2 (formatted), in sequence over the
+    # accumulated string — so first-match-wins: a span an earlier entry redacted
+    # is placeholder text a later entry's digit regex can't re-match. SSN's Pass-1
+    # MUST precede SSN's Pass-2 (the placeholder's "SSN" would else promote a
+    # nearby unrelated bare-9). EIN's Pass-1 (bare-9) is a no-op vs SSN's already-
+    # consumed runs in aggressive mode; in conservative it claims EIN-labeled
+    # bare-9 SSN didn't. Bank-acct's candidate runs last, label-gated in all modes.
+    #
+    # _registry: (pass1_regex, pass1_callback, pass2_regex_or_None, pass2_placeholder)
+    _registry = [
+        (_SSN_NINE, _make_repl(SSN_PLACEHOLDER, _SSN_LABEL_BEFORE, _SSN_LABEL_AFTER, True),
+         _SSN_FORMATTED, SSN_PLACEHOLDER),
+        (_SSN_NINE, _make_repl(EIN_PLACEHOLDER, _EIN_LABEL_BEFORE, _EIN_LABEL_AFTER, True),
+         _EIN_FORMATTED, EIN_PLACEHOLDER),
+        (_SSN_NINE, _make_repl(ROUTING_PLACEHOLDER, _ROUTING_LABEL_BEFORE, _ROUTING_LABEL_AFTER, True),
+         None, None),
+        (_BANK_RANGE, _make_repl(BANK_ACCT_PLACEHOLDER, _BANK_LABEL_BEFORE, _BANK_LABEL_AFTER, False),
+         None, None),
+    ]
+
+    out = text
+    for pass1_re, pass1_cb, pass2_re, pass2_ph in _registry:
+        out = pass1_re.sub(pass1_cb, out)
+        if pass2_re is not None:
+            out = pass2_re.sub(pass2_ph, out)
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Text chunking
 # ---------------------------------------------------------------------------
 def chunk_text(text, chunk_size=DEFAULT_TEXT_CHUNK_SIZE, overlap=DEFAULT_TEXT_CHUNK_OVERLAP):
     """Split text into overlapping chunks, preferring paragraph/section boundaries."""
+    # Scrub SSNs on the FULL text before chunking, so an SSN can never be split
+    # across two chunks in a way that escapes redaction (covers text/PDF/office).
+    text = scrub_ssn(text)
     if len(text) <= chunk_size:
         return [text] if text.strip() else []
 
@@ -834,7 +1095,10 @@ def ingest_pdf(client, config, collection, file_path):
     )
     if _tracker:
         _tracker.track_generation(response)
-    text = response.text
+    # Scrub at extraction, BEFORE the page-marker split branch below — that
+    # branch does not call chunk_text(), so without scrubbing here an SSN in a
+    # PDF page would be embedded raw.
+    text = scrub_ssn(response.text)
 
     # Split by page markers if present, otherwise chunk normally
     pages = []
@@ -972,6 +1236,11 @@ def ingest_office_doc(client, config, collection, file_path):
     if not text.strip():
         print(f"  SKIP (empty document): {file_path}")
         return 0
+
+    # Scrub at extraction, BEFORE the slide/sheet-marker split branches below —
+    # those branches do not call chunk_text(), so without scrubbing here an SSN
+    # in a slide or a spreadsheet cell would be embedded raw.
+    text = scrub_ssn(text)
 
     # Split presentations by slide markers, everything else by text chunks
     sections = []

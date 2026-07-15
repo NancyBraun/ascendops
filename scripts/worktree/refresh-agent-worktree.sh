@@ -2,7 +2,7 @@
 # refresh-agent-worktree.sh
 # Sync the per-agent worktree to origin/main at task-start time.
 #
-# DESTRUCTIVE-RESET REQUIRES OPT-IN (Aussie Nit 1 on PR #53, 2026-05-23):
+# DESTRUCTIVE-RESET REQUIRES OPT-IN (an agent Nit 1 on PR #53, 2026-05-23):
 # The hard-reset path can discard uncommitted work in the worktree. To prevent
 # accidental loss on a routine refresh, the destructive path is gated behind
 # --force-discard. Default behavior is a non-destructive fetch + status check;

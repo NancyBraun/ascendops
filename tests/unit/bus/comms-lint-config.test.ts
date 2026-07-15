@@ -58,13 +58,15 @@ describe('comms-lint-config loader', () => {
     expect(resolved.banned).toHaveLength(10);
     expect(resolved.passive).toHaveLength(2);
     expect(resolved.telegram).toHaveLength(5);
-    expect(resolved.agentName).not.toBeNull();
+    // Roster-driven: with no roster passed, there is NO agent-name rule — the
+    // framework never ships a hardcoded agent roster (config-drive 2026-07-14).
+    expect(resolved.agentName).toBeNull();
 
     // ids match the defaults exactly.
     expect(ids(resolved.banned)).toEqual(ids(defaults.banned));
     expect(ids(resolved.passive)).toEqual(ids(defaults.passive));
     expect(ids(resolved.telegram)).toEqual(ids(defaults.telegram));
-    expect(resolved.agentName?.id).toBe('agent-name:default');
+    expect(defaults.agentName).toBeNull();
 
     // Pattern sources + flags match the defaults byte-for-byte.
     const assertSameRegex = (a: RegExp, b: RegExp) => {
@@ -76,7 +78,6 @@ describe('comms-lint-config loader', () => {
     resolved.telegram.forEach((r, i) => assertSameRegex(r.pattern, defaults.telegram[i].pattern));
     assertSameRegex(resolved.activeContext, defaults.activeContext);
     assertSameRegex(resolved.nextSignalContext, defaults.nextSignalContext);
-    assertSameRegex(resolved.agentName!.pattern, defaults.agentName!.pattern);
 
     // Explicit em-dash flag check: NO flags (not blanket-`i`).
     const emDash = resolved.telegram.find((r) => r.id === 'telegram:em-dash')!;
@@ -307,11 +308,25 @@ describe('comms-lint-config loader', () => {
     expect(ids(resolved.banned)).toEqual(ids(getDefaultCommsLintRules().banned));
   });
 
-  it('F1: empty replace on agentName retains the default agent-name rule (not null)', () => {
+  it('F1: empty replace on a roster-built agentName retains it (not null)', () => {
     writeOrgContext(tmp, 'acme', { agentName: { replace: [] } });
-    const resolved = resolveCommsLintRules({ org: 'acme', frameworkRoot: tmp });
+    const resolved = resolveCommsLintRules({ org: 'acme', frameworkRoot: tmp, roster: ['maple', 'oak'] });
     expect(resolved.agentName).not.toBeNull();
     expect(resolved.agentName!.id).toBe('agent-name:default');
+  });
+
+  it('roster-driven: agentName is built from the configured roster, never hardcoded', () => {
+    // No roster -> no agent-name rule (does not ship any org's names).
+    expect(resolveCommsLintRules({}).agentName).toBeNull();
+    // A configured roster -> a rule matching exactly those names.
+    const resolved = resolveCommsLintRules({ roster: ['maple', 'oak-2'] });
+    expect(resolved.agentName).not.toBeNull();
+    expect(resolved.agentName!.id).toBe('agent-name:default');
+    expect(resolved.agentName!.pattern.test('handing to maple now')).toBe(true);
+    expect(resolved.agentName!.pattern.test('the oak-2 agent')).toBe(true);
+    // Our live names are NOT hardcoded — not in this roster, so not matched.
+    expect(resolved.agentName!.pattern.test('ask dane about it')).toBe(false);
+    expect(resolved.agentName!.pattern.test('collie shipped it')).toBe(false);
   });
 
   it('F1 control: a single valid replace spec still replaces the whole group', () => {

@@ -1,5 +1,6 @@
 import { AgentManager } from './agent-manager.js';
 import { IPCServer } from './ipc-server.js';
+import { redactSSN } from '../utils/ssn-redaction.js';
 import { readdirSync, readFileSync, writeFileSync, existsSync, chmodSync } from 'fs';
 import { spawnSync } from 'child_process';
 import { join } from 'path';
@@ -222,7 +223,8 @@ function sendCrashLoopAlertBestEffort(
       '-X', 'POST',
       `https://api.telegram.org/bot${creds.botToken}/sendMessage`,
       '-d', `chat_id=${creds.chatId}`,
-      '--data-urlencode', `text=${message}`,
+      // Raw egress (no TelegramAPI primitive on this crash-alert path) — scrub here.
+      '--data-urlencode', `text=${redactSSN(message)}`,
     ], { timeout: TELEGRAM_SEND_TIMEOUT_MS, stdio: 'pipe' });
     if (r.status === 0) {
       console.error('[daemon] Crash-loop alert sent to operator chat');

@@ -298,8 +298,8 @@ export function getCronByName(
 /**
  * Status filter for execution log queries.
  * - 'all'     — no status filtering (default)
- * - 'success' — only 'fired' entries
- * - 'failure' — only 'failed' entries
+ * - 'success' — only successful entries ('fired' legacy paste-success or transcript 'confirmed')
+ * - 'failure' — failed entries and terminal persistent no-op detector entries
  */
 export type ExecutionLogStatusFilter = 'all' | 'success' | 'failure';
 
@@ -325,7 +325,7 @@ export interface ExecutionLogPage {
  * @param offset       - Number of matching entries to skip from the most-recent end
  *                       before taking `limit`.  Used for pagination.
  *                       Defaults to 0 (start from most-recent).
- * @param statusFilter - Optional status filter: 'success' (fired only), 'failure' (failed only),
+ * @param statusFilter - Optional status filter: 'success' (fired/confirmed only), 'failure' (failed/noop_persistent),
  *                       or 'all' (default, no filtering).
  * @returns Array of log entries.  Returns [] if the log file doesn't exist.
  *          Malformed JSONL lines are silently skipped.
@@ -391,9 +391,9 @@ export function getExecutionLogPage(
 
   // Apply status filter
   if (statusFilter === 'success') {
-    filtered = filtered.filter(e => e.status === 'fired');
+    filtered = filtered.filter(e => e.status === 'fired' || e.status === 'confirmed');
   } else if (statusFilter === 'failure') {
-    filtered = filtered.filter(e => e.status === 'failed');
+    filtered = filtered.filter(e => e.status === 'failed' || e.status === 'noop_persistent');
   }
 
   const total = filtered.length;

@@ -128,7 +128,7 @@ describe('skill-drift-check', () => {
     execFileSync('git', ['init'], { cwd: root, stdio: 'ignore' });
     seedManifest(root, [
       'templates/other/.claude/skills/demo',
-      'orgs/ascendops/agents/live/.claude/skills/demo',
+      'your org internal docs',
     ]);
     seedSkill(root, 'templates/base/.claude/skills/demo', { 'SKILL.md': 'same\n' });
     seedSkill(root, 'templates/other/.claude/skills/demo', { 'SKILL.md': 'same\n' });
@@ -138,9 +138,9 @@ describe('skill-drift-check', () => {
     const local = run(root, ['--tier', 'local']);
 
     expect(ci.status).toBe(0);
-    expect(ci.stdout).toContain('SKIP orgs/ascendops/agents/live/.claude/skills/demo: not present in tracked tree');
+    expect(ci.stdout).toContain('SKIP your org internal docs: not present in tracked tree');
     expect(local.status).toBe(1);
-    expect(local.stdout).toContain('FAIL orgs/ascendops/agents/live/.claude/skills/demo: missing skill directory');
+    expect(local.stdout).toContain('FAIL your org internal docs: missing skill directory');
   });
 
   it('--fix refuses to clobber extra mirror files as agent-customized conflicts', () => {

@@ -63,6 +63,26 @@ describe('active-threads', () => {
     expect(thread.internal_id).toBe('12729045');
   });
 
+  it('scrubs SSNs from connector free-text (subject/last_action/notes) at add + update', () => {
+    addActiveThread(paths, {
+      meldId: '12729045',
+      subject: 'Verify tenant SSN 123-45-6789',
+      owner: 'blue',
+      status: 'open',
+      lastAction: 'Confirmed ssn 987654321 on file',
+      notes: 'resident tax id: 123456789 pending',
+    });
+    updateActiveThread(paths, '12729045', { notes: 'updated note for 987-65-4321' });
+
+    const state = JSON.parse(readFileSync(join(paths.stateDir, 'active-threads.json'), 'utf-8'));
+    const t = state.threads[0];
+    expect(t.subject).toBe('Verify tenant SSN [REDACTED-SSN]');
+    expect(t.last_action).toBe('Confirmed ssn [REDACTED-SSN] on file');
+    expect(t.notes).toBe('updated note for [REDACTED-SSN]');
+    expect(JSON.stringify(state)).not.toContain('123-45-6789');
+    expect(JSON.stringify(state)).not.toContain('123456789');
+  });
+
   it('adds existing meld_id as an upsert instead of creating a duplicate', () => {
     addActiveThread(paths, {
       meldId: '12729045',

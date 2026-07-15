@@ -35,7 +35,7 @@ If the diff is empty, tell the user there is nothing to review and stop.
 
 ## Contract-at-dispatch (load-bearing)
 
-Every parallel review subagent you spawn in Stage 1, the synthesis subagent in Stage 2, and the implementation-planning subagent in Stage 3 must be dispatched following the 4-part structure from `orgs/ascendops/docs/durable/subagent-prompt-structure-2026-05-24.md`:
+Every parallel review subagent you spawn in Stage 1, the synthesis subagent in Stage 2, and the implementation-planning subagent in Stage 3 must be dispatched following the 4-part structure from `your org internal docs`:
 
 1. **Index-doc framing** — files to read with "why" annotations (especially `$SESSION_DIR/diff.txt`)
 2. **High-level workflow steps** — what each reviewer/synthesizer should produce, not how to format it line-by-line

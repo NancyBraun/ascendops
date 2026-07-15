@@ -92,9 +92,9 @@ describe('SlackSocketListener.handleMessage', () => {
   });
 
   it('enriched "from {name} (@handle, trust)" when team_members has the handle', async () => {
-    getUserInfoMock.mockResolvedValue({ handle: 'jane.smith', displayName: 'Jane Smith' });
+    getUserInfoMock.mockResolvedValue({ handle: 'brittany.hunter', displayName: 'Brittany Hunter' });
     const teamMembers: TeamMember[] = [
-      { name: 'Jane Smith', role: 'Ops', slack_handle: 'jane.smith', trust_level: 'owner' },
+      { name: 'Brittany Hunter', role: 'Ops', slack_handle: 'brittany.hunter', trust_level: 'owner' },
     ];
     const listener = makeListener(() => {}, { teamMembers });
 
@@ -103,14 +103,14 @@ describe('SlackSocketListener.handleMessage', () => {
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
     const text = sendMessageMock.mock.calls[0][4] as string;
     expect(text.split('\n')[0]).toBe(
-      '=== SLACK from Jane Smith (@jane.smith, owner) (channel:C123 ts:1700000000.000100) ===',
+      '=== SLACK from Brittany Hunter (@brittany.hunter, owner) (channel:C123 ts:1700000000.000100) ===',
     );
   });
 
   it('untrusted user dropped when allowlist configured + sender not listed', async () => {
     getUserInfoMock.mockResolvedValue({ handle: 'random.person', displayName: 'Random Person' });
     const logSpy = vi.fn();
-    const listener = makeListener(logSpy, { trustedSlackUsers: ['jane.smith'] });
+    const listener = makeListener(logSpy, { trustedSlackUsers: ['brittany.hunter'] });
 
     await listener.handleMessage(makeEvent({ user: 'URAND' }));
 

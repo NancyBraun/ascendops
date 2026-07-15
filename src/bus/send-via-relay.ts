@@ -1,4 +1,4 @@
-// Thin shim around blue-relay's POST /outbound endpoint. Agents call this
+// Thin shim around the relay agent's POST /outbound endpoint. Agents call this
 // to send a reply through the gateway path: text-only SMS or MMS-with-photo.
 //
 // Architecture: the relay (local Fastify on the Mac, exposed to Railway via
@@ -7,9 +7,11 @@
 // the original sender's phone and fires Telnyx outbound. For unsolicited
 // outbound (no prior inbound), pass a phone in E.164 form directly.
 //
-// Auth: RELAY_INTERNAL_TOKEN env var must match what blue-relay has set.
-// The token is required on every outbound — blue-relay /outbound fails
+// Auth: RELAY_INTERNAL_TOKEN env var must match what the relay agent has set.
+// The token is required on every outbound — the relay agent /outbound fails
 // closed when the env is unset or the X-Relay-Token header doesn't match.
+
+import { redactSSN } from '../utils/ssn-redaction.js';
 
 export interface SendViaRelayInput {
   /** Either a bus message_id (relay resolves to the original sender phone) or an E.164 phone (with leading +) */
@@ -47,7 +49,8 @@ export async function sendViaRelay(input: SendViaRelayInput): Promise<SendViaRel
     return { ok: false, error: 'missing to or text' };
   }
 
-  const body: Record<string, unknown> = { to: input.to, text: input.text };
+  // Scrub at the egress primitive: never SHARE an SSN over the relay (SMS/MMS).
+  const body: Record<string, unknown> = { to: input.to, text: redactSSN(input.text) };
   if (input.photoUrl) body.photo_url = input.photoUrl;
 
   try {

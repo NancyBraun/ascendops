@@ -35,7 +35,7 @@ function makeRow(
     org: string;
     schedule: string;
     lastFire: string | null;
-    lastStatus: 'fired' | 'retried' | 'failed' | null;
+    lastStatus: CronExecutionLogEntry['status'] | null;
     fire_at: string;
     last_fired_at: string;
     nextFire: string;
@@ -60,7 +60,7 @@ function makeRow(
 }
 
 function makeEntry(
-  status: 'fired' | 'retried' | 'failed',
+  status: CronExecutionLogEntry['status'],
   tsMs: number = NOW_MS - 3_600_000,
 ): CronExecutionLogEntry {
   return {
@@ -142,6 +142,31 @@ describe('computeHealth — failure', () => {
     const row = makeRow({ lastFire, lastStatus: 'failed', schedule: '6h' });
     const result = computeHealth(row, [makeEntry('failed', NOW_MS - 1000)], NOW_MS);
     expect(result.state).toBe('failure');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// detector no-op statuses
+// ---------------------------------------------------------------------------
+
+describe('computeHealth — detector no-op statuses', () => {
+  it.each(['noop_unconfirmed', 'noop_reinjected'] as const)(
+    'returns warning when lastStatus is %s',
+    (lastStatus) => {
+      const lastFire = new Date(NOW_MS - 1000).toISOString();
+      const row = makeRow({ lastFire, lastStatus, schedule: '6h' });
+      const result = computeHealth(row, [makeEntry(lastStatus, NOW_MS - 1000)], NOW_MS);
+      expect(result.state).toBe('warning');
+      expect(result.reason).toContain(lastStatus);
+    },
+  );
+
+  it('returns failure when lastStatus is noop_persistent', () => {
+    const lastFire = new Date(NOW_MS - 1000).toISOString();
+    const row = makeRow({ lastFire, lastStatus: 'noop_persistent', schedule: '6h' });
+    const result = computeHealth(row, [makeEntry('noop_persistent', NOW_MS - 1000)], NOW_MS);
+    expect(result.state).toBe('failure');
+    expect(result.reason).toMatch(/persistent cron no-op/i);
   });
 });
 
@@ -290,7 +315,7 @@ describe('computeHealth — successRate24h', () => {
   it('returns 1.0 for all-success entries', () => {
     const entries = [
       makeEntry('fired', NOW_MS - 3_600_000),
-      makeEntry('fired', NOW_MS - 7_200_000),
+      makeEntry('confirmed', NOW_MS - 7_200_000),
     ];
     const row = makeRow({ lastFire: new Date(NOW_MS - 3_600_000).toISOString(), lastStatus: 'fired' });
     const result = computeHealth(row, entries, NOW_MS);

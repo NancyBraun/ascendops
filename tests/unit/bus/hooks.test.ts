@@ -1,4 +1,4 @@
-// added 2026-04-29 by collie via dane dispatch — RFC #15 Day-2 per-handler wiring tests.
+// added 2026-04-29 via internal dispatch — RFC #15 Day-2 per-handler wiring tests.
 // Covers HandlerResult-driven dispatch (fire / block / escalate / undefined / throw) and
 // the basic loadHookRegistry + matchHooks paths so a regression in either surface is caught.
 

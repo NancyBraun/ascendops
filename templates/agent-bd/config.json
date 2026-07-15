@@ -1,0 +1,7 @@
+{
+  "name": "{{AGENT_NAME}}",
+  "role": "agent-bd",
+  "runtime": "{{RUNTIME}}",
+  "model": "{{MODEL}}",
+  "timezone": "{{TIMEZONE}}"
+}

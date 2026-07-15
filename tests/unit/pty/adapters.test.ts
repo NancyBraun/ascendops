@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { platform } from 'os';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
@@ -129,6 +129,40 @@ describe('anthropicAdapter — zero behavior change', () => {
         { config: {}, env },
       );
       expect(args).not.toContain('--append-system-prompt');
+    });
+  });
+
+  describe('buildArgs — dangerously_skip_permissions toggle (#593)', () => {
+    const env = makeEnv('/nonexistent-agent-dir');
+
+    it('includes --dangerously-skip-permissions by default (back-compat: undefined → skip ON)', () => {
+      const args = anthropicAdapter.buildArgs('fresh', 'p', { config: {}, env });
+      expect(args).toContain('--dangerously-skip-permissions');
+    });
+
+    it('omits --dangerously-skip-permissions when dangerously_skip_permissions is false (permission gate engaged)', () => {
+      const args = anthropicAdapter.buildArgs(
+        'fresh',
+        'p',
+        { config: { dangerously_skip_permissions: false }, env },
+      );
+      expect(args).not.toContain('--dangerously-skip-permissions');
+    });
+
+    it('keeps --dangerously-skip-permissions and emits a warning when dangerously_skip_permissions is a non-boolean (typo-safe fallback)', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        // A typo'd string must NOT silently disable the skip flag.
+        const args = anthropicAdapter.buildArgs(
+          'fresh',
+          'p',
+          { config: { dangerously_skip_permissions: 'false' as unknown as boolean }, env },
+        );
+        expect(args).toContain('--dangerously-skip-permissions');
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('dangerously_skip_permissions must be true or false'));
+      } finally {
+        warn.mockRestore();
+      }
     });
   });
 });

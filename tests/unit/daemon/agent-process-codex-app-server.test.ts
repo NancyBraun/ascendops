@@ -70,6 +70,7 @@ vi.mock('fs', async () => {
   return {
     ...actual,
     mkdirSync: vi.fn(),
+    unlinkSync: vi.fn(),
     get existsSync() { return fsMocks.existsSync; },
     get readFileSync() { return fsMocks.readFileSync; },
     get writeFileSync() { return fsMocks.writeFileSync; },
@@ -143,6 +144,47 @@ describe('AgentProcess codex-app-server runtime', () => {
     expect(api.sendMessage).toHaveBeenCalledTimes(1);
     expect(api.sendMessage).toHaveBeenCalledWith('12345', 'Agent codex-app-agent is back online');
     expect(log).toHaveBeenCalledWith('Telegram back-online notification sent for codex-app-agent');
+  });
+
+  it('sends planned-restart msg1 but skips generic back-online Telegram on handoff restart', async () => {
+    // Simulate handoff doc marker present at .handoff-doc-path so
+    // consumeHandoffBlock() returns a non-empty fragment, marking the spawn
+    // as a handoff restart that should suppress the daemon-direct ping.
+    // existsSync must return true for BOTH the marker file and the doc path
+    // it points at — consumeHandoffBlock checks both.
+    const handoffDocPath = '/tmp/handoff-doc.md';
+    fsMocks.existsSync.mockImplementation((path: string) =>
+      typeof path === 'string'
+      && (path.endsWith('.handoff-doc-path') || path === handoffDocPath),
+    );
+    fsMocks.readFileSync.mockReturnValue(handoffDocPath);
+
+    const ap = new AgentProcess('codex-app-agent', mockEnv, { runtime: 'codex-app-server' });
+    const sendMessage = vi.fn().mockResolvedValue(undefined);
+    const api = { sendChatAction: vi.fn().mockResolvedValue(undefined), sendMessage };
+
+    ap.setTelegramHandle(api as any, '12345');
+    await ap.start();
+
+    const prompt = mockCodexAppServerPty.spawn.mock.calls[0]?.[1] ?? '';
+    expect(prompt).toContain('CONTEXT HANDOFF');
+    expect(sendMessage).toHaveBeenCalledWith('12345', '🔄 codex-app-agent restarted (planned): no reason given');
+    expect(sendMessage).not.toHaveBeenCalledWith('12345', 'Agent codex-app-agent is back online');
+    expect(sendMessage).not.toHaveBeenCalledWith('12345', 'Agent codex-app-agent is back online (context handoff)');
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not send daemon-direct back-online Telegram for claude-code runtime (issue #392)', async () => {
+    // claude-code already executes the inline "Send a Telegram message..."
+    // bootstrap instruction itself, so the daemon must not double up.
+    const ap = new AgentProcess('claude-agent', mockEnv, { runtime: 'claude-code' });
+    const sendMessage = vi.fn().mockResolvedValue(undefined);
+    const api = { sendChatAction: vi.fn().mockResolvedValue(undefined), sendMessage };
+
+    ap.setTelegramHandle(api as any, '12345');
+    await ap.start();
+
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 
   it('suppresses the direct codex-app-server back-online notification during a fleet start batch', async () => {

@@ -1,5 +1,15 @@
 import { appendFileSync, renameSync, statSync } from 'fs';
 import { redactSecrets, splitTrailingPartialJwt, BARE_PREFIX_FRAGMENT } from './redact.js';
+import {
+  splitTrailingPartialSsn,
+  splitTrailingPartialSsnLabel,
+  splitTrailingPartialSsnLabelPrefix,
+  isPartialSsnMaterial,
+  splitTrailingPartialEin,
+  splitTrailingPartialNewEntryLabel,
+  splitTrailingPartialNewEntryLabelPrefix,
+  isPartialNewEntryMaterial,
+} from '../utils/ssn-redaction.js';
 
 // Dynamic import for strip-ansi (ESM module)
 let stripAnsi: (text: string) => string;
@@ -23,10 +33,11 @@ export class OutputBuffer {
   private logPath: string | null;
   private bootstrapPattern: string;
   // Trailing substring of the previous push that could be the prefix of a
-  // JWT split across the OS chunk boundary. Prepended to the next chunk so
-  // redactSecrets sees the reassembled token. Bounded by
-  // MAX_PARTIAL_HOLDBACK in redact.ts. Included (redacted) in getRecent()
-  // so bootstrap / rate-limit / activity detection never miss live output.
+  // JWT *or a formatted SSN* split across the OS chunk boundary. Prepended
+  // to the next chunk so redactSecrets sees the reassembled token. Bounded
+  // by MAX_PARTIAL_HOLDBACK (JWT) / MAX_PARTIAL_SSN_HOLDBACK (SSN). Included
+  // (safely masked — see getRecent) in getRecent() so bootstrap / rate-limit /
+  // activity detection never miss live output.
   private pendingTail: string = '';
 
   constructor(maxChunks: number = 1000, logPath?: string, bootstrapPattern?: string) {
@@ -47,20 +58,67 @@ export class OutputBuffer {
    * for the rationale.
    *
    * Chunk-boundary handling: a trailing substring that looks like the
-   * start of a JWT is held back (pendingTail) and prepended to the next
-   * chunk, so a token split across two push() calls is reassembled and
-   * redacted before it reaches the disk log. Held-tail contract: a tail
-   * is held only until the next push() proves it JWT-or-not, OR until
-   * close() flushes it at PTY exit — it is never silently dropped. See
-   * close() for the exit-time disposition.
+   * start of a JWT OR a formatted SSN is held back (pendingTail) and
+   * prepended to the next chunk, so a token split across two push() calls
+   * is reassembled and redacted before it reaches the disk log. When both
+   * a partial-JWT and a partial-SSN tail are present, the LONGER (earlier
+   * starting) one is held so neither secret class can escape. Held-tail
+   * contract: a tail is held only until the next push() proves it secret-
+   * or-not, OR until close() flushes it at PTY exit — it is never silently
+   * dropped. See close() for the exit-time disposition.
+   *
+   * Order matters (cross-token): redactSecrets() runs FIRST, collapsing any
+   * COMPLETE token (JWT or SSN) in this chunk to a placeholder. Only then is
+   * the partial-holdback computed — on the redacted string. If the holdback
+   * ran first, the SSN suffix-hold could strip the trailing digits of a
+   * COMPLETE JWT (whose own holdback correctly declines to split it), leaving
+   * an unmatched JWT prefix in `emit` and flushing the held digits later =
+   * the raw token reconstructed across the boundary. Redacting first means the
+   * holdback only ever sees genuinely-incomplete partials.
    */
   push(data: string): void {
-    const combined = this.pendingTail + data;
-    const [emit, hold] = splitTrailingPartialJwt(combined);
+    const redacted = redactSecrets(this.pendingTail + data);
+    const [, holdJwt] = splitTrailingPartialJwt(redacted);
+    const [, holdSsn] = splitTrailingPartialSsn(redacted);
+    // Also retain a trailing SSN-LABEL region (e.g. a chunk ending `SSN: ` or
+    // `social security number `): the next chunk's number reassembles WITH its
+    // label so the context-keyed redaction fires, closing the chunk-split
+    // `SSN: ` | `987654321` leak to stdout.log (a Layer-1-only sink).
+    const [, holdLabel] = splitTrailingPartialSsnLabel(redacted);
+    // Also retain a trailing PARTIAL label TOKEN split mid-token across the
+    // boundary (e.g. a chunk ending `SS`, the `N: 987654321` arriving next):
+    // splitTrailingPartialSsnLabel needs a COMPLETE label, so the mid-token
+    // split would otherwise reach stdout.log raw. Held bytes are re-emitted on
+    // the next chunk, so a non-label tail is delayed one chunk, never lost.
+    const [, holdLabelPrefix] = splitTrailingPartialSsnLabelPrefix(redacted);
+    // PII v2 m2 — the same holdback discipline for the new registry entries (EIN,
+    // routing, bank-account). A labeled new-entry value split across the boundary
+    // (`routing ` | `021000021`, `bank account ` | `123456789012`, `EIN 12-345` |
+    // `6789`) would otherwise commit the label/prefix chunk (nothing to redact
+    // yet) and let the value chunk land RAW in stdout.log. These hold:
+    //   - a trailing partial FORMATTED EIN (`12-345`);
+    //   - a trailing COMPLETE new-entry label (`routing `, `bank account `);
+    //   - a trailing PARTIAL label token split mid-token (`routi`, `bank acc`).
+    const [, holdEin] = splitTrailingPartialEin(redacted);
+    const [, holdNewLabel] = splitTrailingPartialNewEntryLabel(redacted);
+    const [, holdNewLabelPrefix] = splitTrailingPartialNewEntryLabelPrefix(redacted);
+    // Hold whichever candidate covers MORE trailing characters — all are
+    // suffixes of `redacted`, so the longest suffix subsumes the others and
+    // protects every secret class at once.
+    const hold = [
+      holdJwt,
+      holdSsn,
+      holdLabel,
+      holdLabelPrefix,
+      holdEin,
+      holdNewLabel,
+      holdNewLabelPrefix,
+    ].reduce((a, b) => (b.length > a.length ? b : a), '');
+    const emit = hold ? redacted.slice(0, redacted.length - hold.length) : redacted;
     this.pendingTail = hold;
     if (!emit) return; // everything held back as a potential partial token
 
-    this.commit(redactSecrets(emit));
+    this.commit(emit); // already redacted above
   }
 
   /**
@@ -100,7 +158,18 @@ export class OutputBuffer {
    * - Bare prefix fragment (`e`, `ey`, `eyJ`): emitted VERBATIM — it
    *   contains no token header/payload/signature bytes, and replacing a
    *   legit trailing `e` with a marker would mangle ordinary output.
-   * - Anything longer: may contain real JWT header/payload bytes that
+   * - Partial-SSN material (a digit group + separator, e.g. `123-45-67`):
+   *   masked with `[REDACTED_POSSIBLE_SSN_TAIL]` — the held bytes carry
+   *   most of an SSN, so they must not reach the log.
+   * - Partial formatted-EIN material (a 2-digit group + separator + a digit,
+   *   e.g. `12-3`, held as a possible EIN prefix split across the boundary):
+   *   masked with `[REDACTED_POSSIBLE_EIN_TAIL]` — the held bytes carry most
+   *   of a formatted EIN, so they must not reach the log.
+   * - A bare short digit run with no separator (e.g. `123`, held as a
+   *   possible SSN/EIN prefix), or a partial-EIN prefix with no second-group
+   *   digit yet (e.g. `12-`): emitted VERBATIM — it carries no secret
+   *   structure and masking it would mangle ordinary numeric output.
+   * - Anything else longer: may contain real JWT header/payload bytes that
    *   redactSecrets cannot match (the token is incomplete), so the log
    *   gets an explicit `[REDACTED_POSSIBLE_JWT_TAIL]` marker instead —
    *   loss is recorded, secrets are not.
@@ -112,7 +181,34 @@ export class OutputBuffer {
     const tail = this.pendingTail;
     this.pendingTail = '';
     if (!tail) return;
-    this.commit(BARE_PREFIX_FRAGMENT.test(tail) ? tail : '[REDACTED_POSSIBLE_JWT_TAIL]');
+    if (BARE_PREFIX_FRAGMENT.test(tail)) {
+      this.commit(tail);
+    } else if (isPartialSsnMaterial(tail)) {
+      this.commit('[REDACTED_POSSIBLE_SSN_TAIL]');
+    } else if (isPartialNewEntryMaterial(tail)) {
+      // A partial formatted-EIN tail (`12-3`…`12-345678`) held across the
+      // boundary — carries most of an EIN, mask rather than leak it.
+      this.commit('[REDACTED_POSSIBLE_EIN_TAIL]');
+    } else if (/^\d{1,2}[-.\t ]?\s*$/.test(tail)) {
+      // A bare 1-2 digit run, optionally with a single trailing separator and
+      // whitespace (e.g. `123`-style SSN prefix is covered below; here `12`,
+      // `12-`, `12 ` held only as a possible SSN/EIN prefix) — no maskable
+      // secret material (no second-group digit), emit verbatim.
+      this.commit(tail);
+    } else if (/^\d{1,3}\s*$/.test(tail)) {
+      // Bare digit run (optionally newline/space-terminated, e.g. `exit 123\n`)
+      // held only as a possible SSN prefix — no secret material, emit verbatim.
+      // The trailing-whitespace tolerance matters because the holdback treats
+      // `\s` as a separator, so an ordinary "<short number>\n" line gets held.
+      this.commit(tail);
+    } else if (!/\d/.test(tail)) {
+      // A held trailing SSN-label region with NO digits yet (e.g. `SSN: ` held
+      // because the stream ended before its number arrived) — a label carries
+      // no secret on its own, emit verbatim rather than mask it.
+      this.commit(tail);
+    } else {
+      this.commit('[REDACTED_POSSIBLE_JWT_TAIL]');
+    }
   }
 
   /**
@@ -120,11 +216,19 @@ export class OutputBuffer {
    */
   getRecent(n?: number): string {
     const count = n || this.chunks.length;
-    // Append the (redacted) held-back tail so consumers that poll recent
-    // output — bootstrap detection, trust-prompt detection, rate-limit
-    // scans — see the latest bytes even while a potential partial JWT is
-    // being withheld from the disk log.
-    return this.chunks.slice(-count).join('') + redactSecrets(this.pendingTail);
+    // Append the held-back tail (safely) so consumers that poll recent output
+    // — bootstrap detection, trust-prompt detection, rate-limit scans — see
+    // the latest bytes even while a potential partial token is withheld from
+    // the disk log. redactSecrets() only redacts COMPLETE JWT/SSN tokens; a
+    // held INCOMPLETE partial SSN (e.g. `123-45-6`) is not a complete token,
+    // so it must be masked here exactly as close() does — otherwise a poller
+    // (e.g. the fast-checker) would see most of an SSN.
+    const safeTail = isPartialSsnMaterial(this.pendingTail)
+      ? '[REDACTED_POSSIBLE_SSN_TAIL]'
+      : isPartialNewEntryMaterial(this.pendingTail)
+        ? '[REDACTED_POSSIBLE_EIN_TAIL]'
+        : redactSecrets(this.pendingTail);
+    return this.chunks.slice(-count).join('') + safeTail;
   }
 
   /**

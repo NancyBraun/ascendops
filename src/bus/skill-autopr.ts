@@ -234,6 +234,187 @@ export async function createSkillPr(skillName: string): Promise<void> {
   }
 }
 
+// ─── Skill-audit apply-loop PR (weekly-review Phase 1C, orchestration-upgrade Tip 1 P1) ───
+
+/**
+ * Parse "owner/repo" out of a GitHub remote URL (https or ssh).
+ * Exported for unit testing.
+ */
+export function parseOriginSlug(url: string): string {
+  const m = url.trim().match(/github\.com[:/](.+?)(?:\.git)?\/?$/);
+  if (!m || !m[1].includes('/')) {
+    throw new Error(`Cannot parse owner/repo from origin remote URL: ${url}`);
+  }
+  return m[1];
+}
+
+/**
+ * Build the draft PR body for a skill-audit apply-loop PR.
+ * Exported for unit testing.
+ */
+export function buildAuditPrBody(
+  skillName: string,
+  stagedPaths: string[],
+  conflicts: string[],
+): string {
+  const staged = stagedPaths.map((p) => `- \`${p}\``).join('\n');
+  const conflictBlock = conflicts.length > 0
+    ? `\n## Cascade Conflicts (manual follow-up required)\n\n${conflicts.map((c) => `- \`${c}\``).join('\n')}\n`
+    : '';
+  return `## Skill-Audit Apply Loop: \`${skillName}\`
+
+Applies an ACCEPTED skill-optimizer audit diff to the canonical skill home and cascades it to every mirror/deployed copy (template-first + cascade, per orchestration-upgrade-plan-2026-07-01 Tip 1 P1).
+
+## Files updated
+
+${staged}
+${conflictBlock}
+## Reviewer checklist
+
+- [ ] Diff matches the accepted skill-improvement/<skill>/*-diff.patch verdict from weekly review
+- [ ] Canonical template/shared-skills home updated (not only a per-agent deployed copy)
+- [ ] Cascaded copies stay in sync: \`node scripts/skill-drift-check.mjs --tier ci\` is green
+- [ ] history.json marked diff_applied:true for the applied run
+
+---
+
+Auto-staged by \`cortextos bus create-skill-audit-pr\` (weekly-review Phase 1C)`;
+}
+
+/**
+ * createSkillAuditPr — `cortextos bus create-skill-audit-pr <skill-name>`
+ *
+ * Weekly-review apply loop: after an accepted skill-optimizer diff has been
+ * applied to the canonical skill home and cascaded to mirrors/deployed copies
+ * in the working tree, this commits EVERY modified copy of that skill
+ * (templates/, orgs/, community/) on a skill-audit/<name>-<ts> branch off
+ * origin/main and opens a draft PR against the ORIGIN repo (not the community
+ * upstream). Mirrors createSkillPr's save/branch/restore mechanics.
+ */
+export async function createSkillAuditPr(skillName: string): Promise<void> {
+  if (!SKILL_NAME_RE.test(skillName)) {
+    throw new Error(
+      `Invalid skill name "${skillName}" — must match [a-z0-9][a-z0-9_-]{0,63} (alphanumeric slug only)`,
+    );
+  }
+
+  const frameworkRoot = process.env.CTX_FRAMEWORK_ROOT || process.cwd();
+  const repoSlug = parseOriginSlug(run('git remote get-url origin', frameworkRoot));
+
+  // Collect every modified tracked copy of this skill in the working tree.
+  const porcelain = run('git status --porcelain', frameworkRoot);
+  const changed = porcelain
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => l.slice(3).trim())
+    .filter(
+      (p) =>
+        p.includes(`/skills/${skillName}/`) ||
+        p.includes(`/shared-skills/${skillName}/`),
+    )
+    .filter(
+      (p) =>
+        p.startsWith('templates/') ||
+        p.startsWith('orgs/') ||
+        p.startsWith('community/'),
+    );
+
+  if (changed.length === 0) {
+    throw new Error(
+      `No modified copies of skill "${skillName}" found in the working tree — apply the accepted diff first, then re-run`,
+    );
+  }
+
+  // Duplicate-PR guard on the skill-audit/<name>- branch prefix.
+  let existing: string | null = null;
+  try {
+    existing =
+      run(
+        `gh pr list --repo ${repoSlug} --state open --json headRefName,url ` +
+          `--jq '.[] | select(.headRefName | startswith("skill-audit/${skillName}-")) | .url'`,
+        frameworkRoot,
+      ).trim() || null;
+  } catch {
+    existing = null;
+  }
+  if (existing) {
+    console.log(`Skill-audit PR already open for "${skillName}": ${existing}`);
+    return;
+  }
+
+  // Save modified contents before branch switching — `git checkout` resets
+  // tracked files to committed state (same rationale as createSkillPr).
+  const saved = new Map<string, string>();
+  for (const p of changed) {
+    saved.set(p, readFileSync(join(frameworkRoot, p), 'utf-8'));
+  }
+
+  const ts = Math.floor(Date.now() / 1000);
+  const branch = `skill-audit/${skillName}-${ts}`;
+  let bodyFile: string | null = null;
+
+  try {
+    run('git fetch origin main 2>/dev/null || true', frameworkRoot);
+    run(`git checkout -b ${branch} origin/main`, frameworkRoot);
+
+    for (const [p, content] of saved) {
+      writeFileSync(join(frameworkRoot, p), content, 'utf-8');
+    }
+    for (const p of changed) {
+      run(`git add ${JSON.stringify(p)}`, frameworkRoot);
+    }
+
+    const status = run('git diff --cached --name-only', frameworkRoot);
+    if (!status) {
+      throw new Error(
+        `Nothing staged for skill-audit "${skillName}" — files may already match origin/main`,
+      );
+    }
+
+    run(
+      `git commit -m "skill-audit: apply ${skillName} audit diff (template-first + cascade)\n\nAuto-staged by cortextos bus create-skill-audit-pr (weekly-review apply loop)."`,
+      frameworkRoot,
+    );
+    run(`git push origin ${branch}`, frameworkRoot);
+
+    const body = buildAuditPrBody(skillName, changed, []);
+    bodyFile = join(tmpdir(), `skill-audit-pr-body-${ts}.txt`);
+    writeFileSync(bodyFile, body, 'utf-8');
+
+    const prUrl = run(
+      `gh pr create --repo ${repoSlug} --draft ` +
+        `--title ${JSON.stringify(`skill-audit: apply ${skillName} audit diff`)} ` +
+        `--body-file ${JSON.stringify(bodyFile)} ` +
+        `--head ${branch}`,
+      frameworkRoot,
+    );
+    console.log(`Draft skill-audit PR created for "${skillName}": ${prUrl}`);
+
+    run('git checkout -', frameworkRoot);
+    for (const [p, content] of saved) {
+      writeFileSync(join(frameworkRoot, p), content, 'utf-8');
+    }
+  } catch (err) {
+    try {
+      run('git checkout -', frameworkRoot);
+      for (const [p, content] of saved) {
+        writeFileSync(join(frameworkRoot, p), content, 'utf-8');
+      }
+    } catch {
+      /* ignore */
+    }
+    throw err;
+  } finally {
+    if (bodyFile) {
+      try {
+        unlinkSync(bodyFile);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
 // No require.main === module guard here — skill-autopr.ts is bundled into cli.js
 // by tsup (splitting: false) so that check would always be true and fire on every
 // CLI invocation. The CLI entry point is bus.ts, which registers create-skill-pr

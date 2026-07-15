@@ -119,6 +119,10 @@ export class TelegramPoller {
       try {
         await this.pollOnce();
       } catch (err) {
+        if (!this.running) {
+          this.lastExitReason = 'stopped-externally';
+          return;
+        }
         const msg = err instanceof Error ? err.message : String(err);
         // A 409 Conflict means another getUpdates connection holds the lock
         // (e.g. a not-yet-released connection lingering ~60s after a daemon
@@ -166,6 +170,13 @@ export class TelegramPoller {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes('Conflict') || msg.includes('terminated by other getUpdates')) {
+        if (!this.running) {
+          // Intentional stop() raced an in-flight Conflict: do not enter the
+          // 10s backoff and do not let the Conflict be classified as a
+          // restartable exit — rethrow so start()'s !running guard records
+          // 'stopped-externally' and returns immediately.
+          throw err;
+        }
         console.error('[telegram-poller] Conflict detected (another poller active), backing off 10s');
         await sleep(10_000);
         return;

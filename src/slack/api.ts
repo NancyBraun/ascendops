@@ -1,6 +1,7 @@
 /**
  * Minimal Slack Web API client using built-in fetch (Node 20+).
  */
+import { redactSSN } from '../utils/ssn-redaction.js';
 
 export interface SlackMessage {
   ts: string;
@@ -59,6 +60,8 @@ export class SlackAPI {
   }
 
   async postMessage(channel: string, text: string): Promise<void> {
+    // Scrub at the egress primitive: never SHARE an SSN to Slack.
+    text = redactSSN(text);
     const data = await this.requestJson<{ ok: boolean; error?: string }>('chat.postMessage', {
       method: 'POST',
       headers: {

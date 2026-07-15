@@ -45,7 +45,7 @@ A **Coming soon** tool isn't ready to install yet — check back later or ask in
    >
    > One more gotcha: the skills CLI's own `--agent` flag selects which **coding-tool**
    > it installs for (e.g. `claude-code`, `cursor`) — **not** your cortextOS fleet
-   > agents (collie, blue, …). So `--agent '*'` means "all coding tools," not "all my
+   > agents. So `--agent '*'` means "all coding tools," not "all my
    > agents."
 3. **Install the tool itself.** The skill's page (`skills/pm/SKILL.md`) lists the one command that
    installs the actual CLI. For Property Meld:

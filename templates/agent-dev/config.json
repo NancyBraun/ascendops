@@ -1,0 +1,7 @@
+{
+  "name": "{{AGENT_NAME}}",
+  "role": "agent-dev",
+  "runtime": "{{RUNTIME}}",
+  "model": "{{MODEL}}",
+  "timezone": "{{TIMEZONE}}"
+}

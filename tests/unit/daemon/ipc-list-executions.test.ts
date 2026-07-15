@@ -52,7 +52,7 @@ function writeLogEntries(agentName: string, entries: CronExecutionLogEntry[]): v
 
 function makeEntry(
   cronName: string,
-  status: 'fired' | 'retried' | 'failed',
+  status: CronExecutionLogEntry['status'],
   tsOffset = 0,
 ): CronExecutionLogEntry {
   return {
@@ -145,17 +145,18 @@ describe('list-cron-executions IPC — pagination + filter', () => {
     expect(page.entries.every(e => e.status === 'fired')).toBe(true);
   });
 
-  it('statusFilter=failure: total counts only failed entries', async () => {
+  it('statusFilter=failure: total counts failed and persistent no-op entries', async () => {
     const entries = [
       ...Array.from({ length: 70 }, (_, i) => makeEntry('heartbeat', 'fired', i)),
       ...Array.from({ length: 30 }, (_, i) => makeEntry('heartbeat', 'failed', 70 + i)),
+      ...Array.from({ length: 5 }, (_, i) => makeEntry('heartbeat', 'noop_persistent', 100 + i)),
     ];
     writeLogEntries('boris', entries);
     const { getExecutionLogPage } = await import('../../../src/bus/crons.js');
 
     const page = getExecutionLogPage('boris', 'heartbeat', 100, 0, 'failure');
-    expect(page.total).toBe(30);
-    expect(page.entries.every(e => e.status === 'failed')).toBe(true);
+    expect(page.total).toBe(35);
+    expect(page.entries.every(e => e.status === 'failed' || e.status === 'noop_persistent')).toBe(true);
   });
 
   it('no agent returns empty page', async () => {

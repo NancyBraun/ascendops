@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { atomicWriteSync, ensureDir } from '../utils/atomic.js';
 import { withFileLockSync } from '../utils/lock.js';
+import { redactSSN } from '../utils/ssn-redaction.js';
 import type { BusPaths } from '../types/index.js';
 
 export interface ActiveThread {
@@ -278,13 +279,17 @@ export function addActiveThread(paths: BusPaths, input: AddActiveThreadInput): A
     const thread: ActiveThread = {
       meld_id: resolved.meldId,
       internal_id: resolved.internalId,
-      subject: input.subject,
+      // Scrub connector-derived free text before it is persisted to
+      // active-threads.json — subject / last_action / notes come from PM
+      // work-order data and can carry an SSN. (state file = a connector sink
+      // because the command accepts connector input.)
+      subject: redactSSN(input.subject),
       owner: input.owner,
       status: input.status,
-      last_action: input.lastAction,
+      last_action: redactSSN(input.lastAction),
       last_action_at: nowIso(),
       ...(nextTriggerAt ? { next_trigger_at: nextTriggerAt } : {}),
-      notes: input.notes ?? '',
+      notes: redactSSN(input.notes ?? ''),
     };
 
     if (idx >= 0) state.threads[idx] = thread;
@@ -307,8 +312,8 @@ export function updateActiveThread(paths: BusPaths, meldId: string, updates: Upd
     const next: ActiveThread = {
       ...current,
       ...(updates.status !== undefined ? { status: updates.status } : {}),
-      ...(updates.lastAction !== undefined ? { last_action: updates.lastAction, last_action_at: nowIso() } : {}),
-      ...(updates.notes !== undefined ? { notes: updates.notes } : {}),
+      ...(updates.lastAction !== undefined ? { last_action: redactSSN(updates.lastAction), last_action_at: nowIso() } : {}),
+      ...(updates.notes !== undefined ? { notes: redactSSN(updates.notes) } : {}),
     };
 
     if (updates.nextTriggerAt !== undefined) {

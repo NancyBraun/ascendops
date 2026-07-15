@@ -1,0 +1,57 @@
+{
+  "_comment": "Canonical LABEL_SEP ranges = (JS \\s UNION python \\s) + underscore + DASH. Dash recognizes dashed SSN-class labels (tax-id, social-security) \u2014 conservative-correct, an SSN-class identifier. Identical explicit class both runtimes (JS \\s and python \\s are INCOMPARABLE). JS+python assert live \\s subset of this + build LABEL_SEP from it.",
+  "ranges": [
+    [
+      9,
+      13
+    ],
+    [
+      28,
+      32
+    ],
+    [
+      45,
+      45
+    ],
+    [
+      95,
+      95
+    ],
+    [
+      133,
+      133
+    ],
+    [
+      160,
+      160
+    ],
+    [
+      5760,
+      5760
+    ],
+    [
+      8192,
+      8202
+    ],
+    [
+      8232,
+      8233
+    ],
+    [
+      8239,
+      8239
+    ],
+    [
+      8287,
+      8287
+    ],
+    [
+      12288,
+      12288
+    ],
+    [
+      65279,
+      65279
+    ]
+  ]
+}

@@ -6,7 +6,7 @@ LLM-routed but is cheap as a script. Replaces the heartbeat-cycle store
 shape where an agent fires N icm_memory_store calls in sequence with the
 model formatting JSON for each one.
 
-Design doc: orgs/ascendops/docs/durable/programmatic-mcp-and-subagent-
+Design doc: your org internal docs
 research-dir-design-2026-05-24.md (icm = ~1.3M tokens/month reclaim,
 top-ranked target per the high-value table).
 

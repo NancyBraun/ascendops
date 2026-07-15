@@ -17,6 +17,7 @@
 import { existsSync, readFileSync, writeFileSync, appendFileSync, unlinkSync, mkdirSync, statSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
+import { redactSSN } from '../utils/ssn-redaction.js';
 import { execFile } from 'child_process';
 
 const DEDUP_WINDOW_MS = 10 * 60 * 1000;         // 10 minutes
@@ -50,6 +51,33 @@ const QUIET_SUPPRESSED_TYPES = new Set([
 export function safeCrashCount(raw: string | undefined): number {
   const n = parseInt(raw ?? '', 10);
   return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+/**
+ * Read-only fetch of today's crash count from `.crash_count_today`.
+ *
+ * Item-1 fix: `.crash_count_today` is OWNED solely by the daemon's exit path
+ * (AgentProcess.resetCrashCountIfNewDay in src/daemon/agent-process.ts), which
+ * increments it only AFTER its exit-code guards (daemon-shutdown /
+ * stopRequested / rate-limit / image-poison) have ruled out a benign exit.
+ * This hook MUST NOT write the file — it only reads it for the crash alert and
+ * the chief/analyst notify. The hook classifies end type from on-disk markers
+ * and DEFAULTS to 'crash' when no marker is present (classifyFromMarkers), so a
+ * benign no-marker session rotation (e.g. a codex-app-server agent whose
+ * runtime rotates sessions without writing a cortextos marker) lands in the
+ * crash branch. When this hook also incremented the counter, that
+ * (a) double-counted every REAL crash (daemon +1, hook +1) and
+ * (b) false-counted benign rotations the daemon path had correctly skipped.
+ * Returns 0 for a stale (different-day) or missing/torn file.
+ */
+export function readCrashCountToday(countFile: string, today: string): number {
+  try {
+    const data = readFileSync(countFile, 'utf-8').trim();
+    const [date, count] = data.split(':');
+    return date === today ? safeCrashCount(count) : 0;
+  } catch {
+    return 0;
+  }
 }
 
 function isQuietHoursLA(now: Date): boolean {
@@ -309,35 +337,17 @@ async function main(): Promise<void> {
     }
   }
 
-  // Track crash count (real crashes only).
+  // Surface today's crash count for the alert + chief/analyst notify.
+  // READ-ONLY by design — the daemon's exit path is the single source of truth
+  // for `.crash_count_today` (see readCrashCountToday above for why this hook
+  // must not write it). Display may lag the daemon by one if this hook reads
+  // before the daemon increments; acceptable for an advisory alert, since the
+  // authoritative halt gate is the daemon's own crashCount.
   const today = new Date().toISOString().split('T')[0];
   const countFile = join(stateDir, '.crash_count_today');
   let crashCount = 0;
-  if (endType === 'crash') {
-    try {
-      const data = readFileSync(countFile, 'utf-8').trim();
-      const [date, count] = data.split(':');
-      // Guard parse: a malformed `count` coerces to 0 so a same-day increment
-      // still yields a real number (0 + 1 = 1) instead of writing back `:NaN`,
-      // which would self-propagate and defeat the restart-attempted cap below.
-      crashCount = date === today ? safeCrashCount(count) + 1 : 1;
-    } catch {
-      crashCount = 1;
-    }
-    try {
-      writeFileSync(countFile, `${today}:${crashCount}`, 'utf-8');
-    } catch { /* ignore */ }
-  } else if (endType === 'daemon-crashed') {
-    // Read-only: surface today's count to chief/analyst without mutating it.
-    try {
-      const data = readFileSync(countFile, 'utf-8').trim();
-      const [date, count] = data.split(':');
-      // Same guard on the read-only path: a malformed token surfaces as 0
-      // rather than NaN in the chief/analyst alert.
-      crashCount = date === today ? safeCrashCount(count) : 0;
-    } catch {
-      crashCount = 0;
-    }
+  if (endType === 'crash' || endType === 'daemon-crashed') {
+    crashCount = readCrashCountToday(countFile, today);
   }
 
   // Read last heartbeat for context
@@ -453,7 +463,8 @@ async function main(): Promise<void> {
       await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text: message }),
+        // Raw egress (no TelegramAPI primitive on this crash path) — scrub here.
+        body: JSON.stringify({ chat_id: chatId, text: redactSSN(message) }),
       });
     } catch { /* ignore send failures */ }
   }

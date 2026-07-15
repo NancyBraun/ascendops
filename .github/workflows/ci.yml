@@ -22,6 +22,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Check tracked skill mirror drift
+        run: node scripts/skill-drift-check.mjs --tier ci
+
       - name: Type check
         run: npm run typecheck
 
@@ -58,6 +61,16 @@ jobs:
 
       - name: Run codex parity tests
         run: npm run test:codex
+
+      # SSN-redaction JS↔python parity must be CI-enforced: the python redactor
+      # (mmrag.py) and the differential fuzz had no CI step, so a python-side edit
+      # could silently desync the two redactors. ubuntu-latest ships python3 and
+      # mmrag.py imports only stdlib, so this needs no setup-python / pip install.
+      - name: Run SSN python parity tests (corpus + set/label drift-guards)
+        run: python3 knowledge-base/scripts/test_scrub_ssn.py
+
+      - name: Run JS↔python SSN differential parity fuzz
+        run: npx tsx scripts/ssn-parity-fuzz.ts
 
   dashboard-build:
     name: Dashboard Build
