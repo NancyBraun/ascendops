@@ -1,0 +1,144 @@
+{
+  "slug": "cpm-inspection-workflows",
+  "name": "CPM Property Inspection Workflows",
+  "description": "Carolinas PM inspection workflow covering both move-in inspections ($150 owner charge) and routine periodic inspections ($120 owner charge). Inspections are completed in zInspector by the field rep, results reviewed by PM and maintenance, documented in AppFolio and SharePoint, shared via owner portal, and billed via ASANA. Routine inspections trigger from Monday.com at 60 days post move-in.",
+  "subject_type": "property_inspection",
+  "default_start_stage_key": "inspection-scheduling",
+  "captured_at": "2026-07-15T00:00:00.000Z",
+  "stages": [
+    {
+      "stage_key": "inspection-scheduling",
+      "name": "Inspection Scheduling",
+      "description": "Schedule the inspection with the field rep. For routine inspections, Monday.com auto-notifies the tenant at 60 days post move-in. For move-in inspections, schedule directly with the field rep.",
+      "steps": [
+        {
+          "task_key": "confirm-inspection-trigger",
+          "title": "Confirm inspection type and trigger",
+          "kind": "agent_task",
+          "assigned_role": "maintenance",
+          "is_automated": true,
+          "instructions": "Determine inspection type: Move-In Inspection (triggered at move-in, $150 owner charge) or Routine Inspection (triggered by Monday.com at 60 days post move-in, $120 owner charge). For routine inspections, confirm Monday.com auto-notified the tenant to contact the Maintenance Coordinator to schedule.",
+          "dispatch_title": "Confirm inspection type (move-in or routine) and trigger",
+          "dispatch_body": "Determine inspection type. For routine: verify Monday.com auto-notification to tenant was sent at 60-day trigger. For move-in: confirm move-in date and schedule directly.",
+          "estimated_minutes": 10
+        },
+        {
+          "task_key": "schedule-with-field-rep",
+          "title": "Schedule inspection appointment with field rep",
+          "kind": "agent_task",
+          "assigned_role": "maintenance",
+          "is_automated": true,
+          "depends_on": ["confirm-inspection-trigger"],
+          "instructions": "Schedule the inspection with the assigned field representative. For routine inspections, coordinate with the Maintenance Coordinator for scheduling. Confirm the inspection date, time, and access instructions.",
+          "dispatch_title": "Schedule inspection with field rep",
+          "dispatch_body": "Schedule inspection with assigned field rep. Confirm date, time, and access instructions. Document appointment.",
+          "estimated_minutes": 15
+        }
+      ]
+    },
+    {
+      "stage_key": "inspection-execution",
+      "name": "Inspection Execution",
+      "description": "Field rep completes the inspection in zInspector covering all required areas with photos.",
+      "steps": [
+        {
+          "task_key": "complete-inspection-zinspector",
+          "title": "Complete inspection in zInspector",
+          "kind": "agent_task",
+          "assigned_role": "maintenance",
+          "is_automated": true,
+          "depends_on": ["schedule-with-field-rep"],
+          "instructions": "Complete the full property inspection in zInspector. Required inspection areas: overall condition and cleanliness, appliances, HVAC system, plumbing, electrical systems, smoke and CO detector presence and function, and detailed photos throughout. Complete all checklist sections before closing the inspection.",
+          "dispatch_title": "Complete full property inspection in zInspector",
+          "dispatch_body": "Complete zInspector inspection: condition/cleanliness, appliances, HVAC, plumbing, electrical, smoke/CO detectors, photos. All sections required before closing.",
+          "estimated_minutes": 60
+        }
+      ]
+    },
+    {
+      "stage_key": "findings-review",
+      "name": "Findings Review And PM Determination",
+      "description": "Generate and send inspection findings summary to PM and Maintenance. PM determines required repairs or lease violation responses.",
+      "steps": [
+        {
+          "task_key": "generate-summary-email",
+          "title": "Generate and send findings summary to PM and Maintenance",
+          "kind": "agent_task",
+          "assigned_role": "maintenance",
+          "is_automated": true,
+          "depends_on": ["complete-inspection-zinspector"],
+          "instructions": "Generate a summary of the inspection findings from zInspector. Send the summary email to the assigned PM and the Maintenance team with key findings, photos, and any items requiring attention.",
+          "dispatch_title": "Generate and send inspection findings summary",
+          "dispatch_body": "Generate zInspector findings summary. Send to PM and Maintenance: key findings, photos, items requiring attention.",
+          "estimated_minutes": 20
+        },
+        {
+          "task_key": "pm-determines-repairs",
+          "title": "PM reviews findings and determines required actions",
+          "kind": "human_review",
+          "assigned_role": "pm",
+          "is_automated": false,
+          "depends_on": ["generate-summary-email"],
+          "instructions": "Review the inspection summary and determine: what repairs are needed, whether any findings represent lease violations requiring tenant notice, and whether any work orders should be created. For routine inspections, determine if violations require follow-up.",
+          "human_prompt": "Review inspection findings. Determine: required repairs, lease violations needing tenant notice, and work orders to create. Specify all required actions.",
+          "estimated_minutes": 20
+        },
+        {
+          "task_key": "handle-violations-work-orders",
+          "title": "Process PM-directed violations and work orders",
+          "kind": "agent_task",
+          "assigned_role": "maintenance",
+          "is_automated": true,
+          "depends_on": ["pm-determines-repairs"],
+          "instructions": "Based on PM direction: create any required work orders in AppFolio, coordinate vendor scheduling, and send any tenant violation notices required. For routine inspections, PM and Admin handle lease violation responses.",
+          "dispatch_title": "Process PM-directed work orders and violation notices",
+          "dispatch_body": "Based on PM direction: create work orders in AppFolio, schedule vendors, send tenant violation notices as directed. Document all actions.",
+          "estimated_minutes": 30
+        }
+      ]
+    },
+    {
+      "stage_key": "documentation-and-billing",
+      "name": "Documentation And Owner Billing",
+      "description": "Upload inspection report to AppFolio and SharePoint, share with owner through owner portal, and charge owner via ASANA task to Accounting.",
+      "steps": [
+        {
+          "task_key": "upload-inspection-report",
+          "title": "Upload inspection report to AppFolio and SharePoint",
+          "kind": "agent_task",
+          "assigned_role": "maintenance",
+          "is_automated": true,
+          "depends_on": ["handle-violations-work-orders"],
+          "instructions": "Upload the complete zInspector inspection report (with photos) to the property's AppFolio page and the SharePoint property folder. Verify successful upload to both locations.",
+          "dispatch_title": "Upload inspection report to AppFolio and SharePoint",
+          "dispatch_body": "Upload full zInspector report with photos to AppFolio property page and SharePoint property folder. Verify upload success in both.",
+          "estimated_minutes": 20
+        },
+        {
+          "task_key": "share-with-owner-portal",
+          "title": "Share inspection report with owner via AppFolio owner portal",
+          "kind": "agent_task",
+          "assigned_role": "maintenance",
+          "is_automated": true,
+          "depends_on": ["upload-inspection-report"],
+          "instructions": "Share the inspection report with the property owner through the AppFolio Owner Portal.",
+          "dispatch_title": "Share inspection report with owner via AppFolio Owner Portal",
+          "dispatch_body": "Share inspection report with owner via AppFolio Owner Portal.",
+          "estimated_minutes": 10
+        },
+        {
+          "task_key": "charge-owner-inspection-fee",
+          "title": "Create ASANA task to charge owner inspection fee",
+          "kind": "agent_task",
+          "assigned_role": "accounting",
+          "is_automated": true,
+          "depends_on": ["share-with-owner-portal"],
+          "instructions": "Create an ASANA task requesting Accounting charge the owner the applicable inspection fee: Move-In Inspection = $150, Routine Inspection = $120. Include property address, inspection date, and inspection type.",
+          "dispatch_title": "ASANA: Charge owner inspection fee (Move-In $150 / Routine $120)",
+          "dispatch_body": "Create ASANA task for Accounting: charge owner inspection fee. Move-In = $150, Routine = $120. Include property address, inspection date, and type.",
+          "estimated_minutes": 10
+        }
+      ]
+    }
+  ]
+}

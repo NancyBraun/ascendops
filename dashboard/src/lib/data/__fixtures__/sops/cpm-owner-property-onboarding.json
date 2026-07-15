@@ -1,0 +1,168 @@
+{
+  "slug": "cpm-owner-property-onboarding",
+  "name": "CPM New Owner And Property Onboarding",
+  "description": "Carolinas PM onboarding workflow for new owners from PMA execution through AppFolio owner and property setup, SharePoint records organization, and CRM status updates (Monday.com WON, LeadSimple NEW CLIENT). Do not begin AppFolio onboarding until the PMA is fully executed by all parties.",
+  "subject_type": "owner_onboarding",
+  "default_start_stage_key": "pma-execution",
+  "captured_at": "2026-07-15T00:00:00.000Z",
+  "stages": [
+    {
+      "stage_key": "pma-execution",
+      "name": "PMA Execution",
+      "description": "Receive prospective owner information from the PM and execute the Property Management Agreement via DocuSign before any AppFolio onboarding begins.",
+      "steps": [
+        {
+          "task_key": "receive-owner-info",
+          "title": "Receive prospective owner information from PM",
+          "kind": "agent_task",
+          "assigned_role": "operations",
+          "is_automated": true,
+          "instructions": "Receive and normalize owner contact information, property address, management details, and any additional information needed to prepare the PMA. This information comes from the assigned PM.",
+          "dispatch_title": "Collect prospective owner information from PM",
+          "dispatch_body": "Normalize: owner contact info, property address, management details, PM assignment. No system writes until PMA is executed.",
+          "estimated_minutes": 15
+        },
+        {
+          "task_key": "prepare-and-send-pma",
+          "title": "Prepare PMA and send via DocuSign",
+          "kind": "agent_task",
+          "assigned_role": "operations",
+          "is_automated": true,
+          "depends_on": ["receive-owner-info"],
+          "instructions": "Draft the Property Management Agreement using the received owner and property information. Send via DocuSign to the property owner and assigned PM for signature. Monitor the agreement until all required signatures are completed.",
+          "dispatch_title": "Draft and send Property Management Agreement via DocuSign",
+          "dispatch_body": "Draft PMA from owner/property info. Send via DocuSign to owner and PM. Monitor for all signatures. Do not begin AppFolio onboarding until fully executed.",
+          "estimated_minutes": 30
+        },
+        {
+          "task_key": "pma-execution-gate",
+          "title": "Confirm PMA fully executed by all parties",
+          "kind": "human_approval",
+          "assigned_role": "human",
+          "is_automated": false,
+          "depends_on": ["prepare-and-send-pma"],
+          "instructions": "Confirm all required signatures (owner and PM) are complete on the DocuSign PMA. Do not proceed with AppFolio onboarding until full execution is confirmed.",
+          "human_prompt": "Confirm the PMA is fully signed by all parties in DocuSign before AppFolio onboarding begins.",
+          "estimated_minutes": 5
+        }
+      ]
+    },
+    {
+      "stage_key": "appfolio-setup",
+      "name": "AppFolio Owner And Property Setup",
+      "description": "Create the owner profile, send Owner Portal activation, and create and link the property in AppFolio.",
+      "steps": [
+        {
+          "task_key": "onboard-owner-appfolio",
+          "title": "Create owner profile in AppFolio",
+          "kind": "agent_task",
+          "assigned_role": "operations",
+          "is_automated": true,
+          "depends_on": ["pma-execution-gate"],
+          "instructions": "Navigate to AppFolio Dashboard > Tasks > New Owner. Complete all required owner information and save the owner profile.",
+          "dispatch_title": "Create owner profile in AppFolio",
+          "dispatch_body": "Navigate to AppFolio Dashboard > Tasks > New Owner. Complete all required fields and save.",
+          "estimated_minutes": 20
+        },
+        {
+          "task_key": "send-owner-portal-activation",
+          "title": "Send Owner Portal activation email",
+          "kind": "agent_task",
+          "assigned_role": "operations",
+          "is_automated": true,
+          "depends_on": ["onboard-owner-appfolio"],
+          "instructions": "Navigate to the Owner's page in AppFolio and send the Owner Portal activation email. Confirm the activation invitation was sent successfully.",
+          "dispatch_title": "Send AppFolio Owner Portal activation email",
+          "dispatch_body": "Send Owner Portal activation email from owner's AppFolio page. Confirm send success.",
+          "estimated_minutes": 10
+        },
+        {
+          "task_key": "create-property-appfolio",
+          "title": "Create property and link to owner in AppFolio",
+          "kind": "agent_task",
+          "assigned_role": "operations",
+          "is_automated": true,
+          "depends_on": ["onboard-owner-appfolio"],
+          "instructions": "Navigate to AppFolio Dashboard > Tasks > New Property. Complete all required property information and save the record. Assign the property to the correct owner from the Property page. Verify the property is properly linked to the owner account.",
+          "dispatch_title": "Create and link property in AppFolio",
+          "dispatch_body": "Navigate to AppFolio Dashboard > Tasks > New Property. Complete all fields, save, and link to owner. Verify property-owner link is correct.",
+          "estimated_minutes": 20
+        }
+      ]
+    },
+    {
+      "stage_key": "records-organization",
+      "name": "Records Organization",
+      "description": "Create SharePoint property folder and upload the executed PMA to AppFolio and SharePoint.",
+      "steps": [
+        {
+          "task_key": "create-sharepoint-folder",
+          "title": "Create SharePoint property folder",
+          "kind": "agent_task",
+          "assigned_role": "operations",
+          "is_automated": true,
+          "depends_on": ["create-property-appfolio"],
+          "instructions": "Create a dedicated SharePoint folder for the property using the company's standard folder structure. This folder will store all property-related documents.",
+          "dispatch_title": "Create SharePoint folder for new property",
+          "dispatch_body": "Create SharePoint property folder using CPM standard folder structure.",
+          "estimated_minutes": 10
+        },
+        {
+          "task_key": "upload-executed-pma",
+          "title": "Upload executed PMA to AppFolio and SharePoint",
+          "kind": "agent_task",
+          "assigned_role": "operations",
+          "is_automated": true,
+          "depends_on": ["create-sharepoint-folder"],
+          "instructions": "Upload the fully executed Property Management Agreement to the AppFolio property page and the property's SharePoint folder. Verify successful upload to both locations.",
+          "dispatch_title": "Upload signed PMA to AppFolio property page and SharePoint",
+          "dispatch_body": "Upload executed PMA to AppFolio property page and SharePoint property folder. Verify upload success in both locations.",
+          "estimated_minutes": 15
+        }
+      ]
+    },
+    {
+      "stage_key": "system-sync",
+      "name": "System And CRM Updates",
+      "description": "Notify Accounting via ASANA for setup fee, update Monday.com New Client board to WON (triggers owner onboarding automations), and update LeadSimple to NEW CLIENT.",
+      "steps": [
+        {
+          "task_key": "notify-accounting-setup-fee",
+          "title": "Create ASANA task for owner account setup fee",
+          "kind": "agent_task",
+          "assigned_role": "accounting",
+          "is_automated": true,
+          "depends_on": ["upload-executed-pma"],
+          "instructions": "Create an ASANA task for Accounting (APM/Anna) providing management agreement information, property information, and a copy of the signed PMA. Request the owner be charged the applicable Account Setup Fee.",
+          "dispatch_title": "ASANA: Charge new owner Account Setup Fee",
+          "dispatch_body": "Create ASANA task for APM: charge owner Account Setup Fee. Include PMA copy, management agreement info, and property address.",
+          "estimated_minutes": 10
+        },
+        {
+          "task_key": "update-monday-won",
+          "title": "Update Monday.com New Client board to WON",
+          "kind": "agent_task",
+          "assigned_role": "operations",
+          "is_automated": true,
+          "depends_on": ["notify-accounting-setup-fee"],
+          "instructions": "Navigate to Monday.com New Client board. Enter owner information, property information, assigned PM, and other required onboarding details. Change the status to WON. This triggers owner onboarding email automations and internal team notifications.",
+          "dispatch_title": "Update Monday.com New Client board to WON",
+          "dispatch_body": "Add owner info, property info, and PM assignment to Monday.com New Client board. Change status to WON to trigger onboarding automations and team notifications.",
+          "estimated_minutes": 15
+        },
+        {
+          "task_key": "update-leadsimple-new-client",
+          "title": "Update LeadSimple opportunity to NEW CLIENT",
+          "kind": "agent_task",
+          "assigned_role": "operations",
+          "is_automated": true,
+          "depends_on": ["update-monday-won"],
+          "instructions": "Navigate to the owner's record in LeadSimple and change the opportunity status to NEW CLIENT. This ensures the owner is properly categorized in the CRM and reflects that the PMA has been executed.",
+          "dispatch_title": "Update LeadSimple owner to NEW CLIENT",
+          "dispatch_body": "Change owner's LeadSimple opportunity status to NEW CLIENT. Verify CRM record reflects executed PMA.",
+          "estimated_minutes": 10
+        }
+      ]
+    }
+  ]
+}

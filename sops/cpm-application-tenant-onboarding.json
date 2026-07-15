@@ -1,0 +1,286 @@
+{
+  "slug": "cpm-application-tenant-onboarding",
+  "name": "CPM Application Screening And Tenant Onboarding",
+  "description": "Carolinas PM end-to-end workflow from rental application receipt through move-in possession release. Covers Boompay application screening, income and rental history verification, PM approval decision, AppFolio tenant setup, lease preparation, fund collection, document verification, property preparation, and 72-hour move-in follow-up.",
+  "subject_type": "rental_application",
+  "default_start_stage_key": "application-intake",
+  "captured_at": "2026-07-15T00:00:00.000Z",
+  "stages": [
+    {
+      "stage_key": "application-intake",
+      "name": "Application Intake",
+      "description": "Receive application via Boompay, confirm application fee has been paid, and run comprehensive screening.",
+      "steps": [
+        {
+          "task_key": "receive-and-verify-application",
+          "title": "Receive application and confirm fee paid",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "instructions": "Receive the rental application via Boompay. Confirm the application fee has been collected before proceeding with any screening. Document application receipt date and applicant information.",
+          "dispatch_title": "Receive application and confirm Boompay fee collected",
+          "dispatch_body": "Verify application received in Boompay and application fee collected. Do not begin screening until fee is confirmed paid. Document receipt.",
+          "estimated_minutes": 10
+        },
+        {
+          "task_key": "run-boompay-screening",
+          "title": "Review Boompay screening report",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["receive-and-verify-application"],
+          "instructions": "Review the Boompay screening report covering: identity verification, credit history and score, criminal background, eviction history, and income and employment verification. Document all findings and any flags.",
+          "dispatch_title": "Review Boompay screening report (identity, credit, criminal, eviction, income)",
+          "dispatch_body": "Review Boompay report: identity, credit, criminal background, eviction history, income/employment. Document all findings and flags.",
+          "estimated_minutes": 20
+        }
+      ]
+    },
+    {
+      "stage_key": "income-and-history-verification",
+      "name": "Income And Rental History Verification",
+      "description": "Independently verify income via pay stubs and rental history via prior landlord contact before escalating to PM.",
+      "steps": [
+        {
+          "task_key": "verify-income",
+          "title": "Verify income via pay stubs or bank statements",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["run-boompay-screening"],
+          "instructions": "Collect and verify income documentation (pay stubs, bank statements, or employer verification). Confirm income meets the property's minimum income requirement. Document verification results.",
+          "dispatch_title": "Verify applicant income via pay stubs or bank statements",
+          "dispatch_body": "Collect income documentation (pay stubs, bank statements). Verify income meets minimum requirement. Document results.",
+          "estimated_minutes": 20
+        },
+        {
+          "task_key": "verify-rental-history",
+          "title": "Verify rental history via prior landlord contact",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["run-boompay-screening"],
+          "instructions": "Contact prior landlords to verify rental history. Ask about: payment history, lease compliance, property condition at move-out, and whether they would rent to the applicant again. Document all landlord responses.",
+          "dispatch_title": "Verify rental history via prior landlord contact",
+          "dispatch_body": "Contact prior landlords: verify payment history, lease compliance, move-out condition, and re-rental recommendation. Document all responses.",
+          "estimated_minutes": 20
+        }
+      ]
+    },
+    {
+      "stage_key": "pm-decision",
+      "name": "PM Approval Decision",
+      "description": "PM reviews all screening and verification results, determines the required deposit, and issues an approve, deny, or request-additional-documents decision.",
+      "steps": [
+        {
+          "task_key": "pm-screening-review",
+          "title": "PM reviews full screening package and issues decision",
+          "kind": "human_review",
+          "assigned_role": "pm",
+          "is_automated": false,
+          "depends_on": ["verify-income", "verify-rental-history"],
+          "instructions": "Review complete screening package: Boompay report, income verification, and rental history results. Determine the required security deposit amount. Issue decision: approve, deny, or request additional documentation.",
+          "human_prompt": "Review full screening package (Boompay report, income verification, rental history). Determine deposit amount. Issue decision: APPROVE, DENY, or REQUEST ADDITIONAL DOCS.",
+          "estimated_minutes": 30
+        },
+        {
+          "task_key": "process-pm-decision",
+          "title": "Process PM decision (approval or denial)",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["pm-screening-review"],
+          "instructions": "If PM approves: proceed to the approval processing stage. If PM denies: generate a formal denial notice in compliance with fair housing requirements and send to the applicant. Document the outcome.",
+          "dispatch_title": "Process PM approval or denial decision",
+          "dispatch_body": "If approved: proceed to tenant onboarding. If denied: generate compliant denial notice and send to applicant. Document outcome.",
+          "estimated_minutes": 15
+        }
+      ]
+    },
+    {
+      "stage_key": "approval-and-lease-preparation",
+      "name": "Approval Processing And Lease Preparation",
+      "description": "Convert approved applicant to tenant in AppFolio and Boompay, send approval letter, set up all charges, and prepare and send the lease.",
+      "steps": [
+        {
+          "task_key": "approve-in-boompay-sync-appfolio",
+          "title": "Approve in Boompay and sync to AppFolio",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["process-pm-decision"],
+          "instructions": "Mark the applicant as approved in Boompay and sync the applicant to AppFolio. Send the approval letter to the applicant.",
+          "dispatch_title": "Approve in Boompay and sync to AppFolio, send approval letter",
+          "dispatch_body": "Mark approved in Boompay. Sync to AppFolio. Send approval letter to applicant.",
+          "estimated_minutes": 15
+        },
+        {
+          "task_key": "convert-to-tenant-setup-charges",
+          "title": "Convert applicant to tenant and configure charges in AppFolio",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["approve-in-boompay-sync-appfolio"],
+          "instructions": "In AppFolio, convert the applicant to a tenant. Set up all charges: security deposit (as approved by PM), rent amount, lease preparation fee, Resident Benefit Package (RBP), pet charges if applicable. Verify utility transfer requirements.",
+          "dispatch_title": "Convert applicant to tenant in AppFolio and configure all charges",
+          "dispatch_body": "AppFolio: convert applicant to tenant. Configure: security deposit, rent, lease prep fee, RBP, pet charges. Verify utility transfer.",
+          "estimated_minutes": 20
+        },
+        {
+          "task_key": "prepare-and-send-lease",
+          "title": "Prepare and send lease via AppFolio",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["convert-to-tenant-setup-charges"],
+          "instructions": "Prepare the lease agreement in AppFolio with all approved terms and send it to the tenant for signature.",
+          "dispatch_title": "Prepare and send lease agreement via AppFolio",
+          "dispatch_body": "Prepare lease in AppFolio with all approved terms. Send to tenant for signature.",
+          "estimated_minutes": 20
+        },
+        {
+          "task_key": "notify-internal-teams",
+          "title": "Notify internal teams via ASANA and Monday.com",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["prepare-and-send-lease"],
+          "instructions": "Create an ASANA task notifying relevant internal teams of the new tenant. Update Monday.com with the new tenant's information and expected move-in date.",
+          "dispatch_title": "Notify internal teams via ASANA and Monday.com",
+          "dispatch_body": "Create ASANA task for internal team notification. Update Monday.com with new tenant info and move-in date.",
+          "estimated_minutes": 15
+        }
+      ]
+    },
+    {
+      "stage_key": "fund-collection",
+      "name": "Fund Collection",
+      "description": "Collect all required funds on the required timelines: holding deposit within 24 hours, security deposit within 24 hours, and remaining charges at least 2 days before move-in.",
+      "steps": [
+        {
+          "task_key": "collect-holding-and-security-deposit",
+          "title": "Collect holding deposit and security deposit",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["prepare-and-send-lease"],
+          "instructions": "Collect the holding deposit within 24 hours of approval. Collect the full security deposit within 24 hours. Confirm funds are received and cleared. Document all payment confirmations in AppFolio.",
+          "dispatch_title": "Collect holding deposit and security deposit",
+          "dispatch_body": "Collect holding deposit within 24h and security deposit within 24h. Confirm cleared funds. Document in AppFolio.",
+          "estimated_minutes": 15
+        },
+        {
+          "task_key": "collect-remaining-charges",
+          "title": "Collect remaining charges at least 2 days before move-in",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["collect-holding-and-security-deposit"],
+          "instructions": "Collect all remaining move-in charges (lease prep fee, RBP, pet charges, etc.) at least 2 days before the scheduled move-in date. Confirm all funds are cleared before releasing possession.",
+          "dispatch_title": "Collect remaining move-in charges (2+ days before move-in)",
+          "dispatch_body": "Collect all remaining charges at least 2 days before move-in. Confirm cleared before possession release. Document in AppFolio.",
+          "estimated_minutes": 15
+        }
+      ]
+    },
+    {
+      "stage_key": "document-verification",
+      "name": "Required Document Verification",
+      "description": "Verify all required documents are received and on file before move-in: renters insurance, pet liability, utility transfers, HOA registration, and PetScreening.",
+      "steps": [
+        {
+          "task_key": "verify-required-documents",
+          "title": "Verify all required pre-move-in documents",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["collect-remaining-charges"],
+          "instructions": "Verify receipt and completeness of all required documents: renters insurance policy, pet liability insurance (if applicable), utility transfer confirmation, HOA registration (if applicable), and PetScreening documentation (if pets). Do not release possession until all documents are confirmed.",
+          "dispatch_title": "Verify all required pre-move-in documents",
+          "dispatch_body": "Verify before possession release: renters insurance, pet liability (if pets), utility transfer confirmation, HOA registration (if applicable), PetScreening (if pets). Do not release until all confirmed.",
+          "estimated_minutes": 20
+        }
+      ]
+    },
+    {
+      "stage_key": "property-preparation",
+      "name": "Property Preparation",
+      "description": "Ensure the property is cleaned, maintenance is complete, and a move-in inspection is performed before the tenant takes possession.",
+      "steps": [
+        {
+          "task_key": "property-cleaning-maintenance",
+          "title": "Coordinate property cleaning and maintenance",
+          "kind": "agent_task",
+          "assigned_role": "maintenance",
+          "is_automated": true,
+          "depends_on": ["verify-required-documents"],
+          "instructions": "Coordinate professional cleaning and any outstanding maintenance work to ensure the property is move-in ready. Confirm all work is complete before the move-in date.",
+          "dispatch_title": "Coordinate property cleaning and maintenance for move-in",
+          "dispatch_body": "Coordinate professional cleaning and outstanding maintenance. Confirm all work complete before move-in date.",
+          "estimated_minutes": 60
+        },
+        {
+          "task_key": "move-in-inspection",
+          "title": "Schedule and complete move-in inspection",
+          "kind": "agent_task",
+          "assigned_role": "maintenance",
+          "is_automated": true,
+          "depends_on": ["property-cleaning-maintenance"],
+          "instructions": "Schedule and complete the move-in inspection per the CPM Inspection Workflows SOP (cpm-inspection-workflows). The move-in inspection must be completed before possession is released. Owner is charged $150.",
+          "dispatch_title": "Complete move-in inspection (see cpm-inspection-workflows SOP)",
+          "dispatch_body": "Schedule and complete move-in inspection per cpm-inspection-workflows SOP. Must complete before possession release. Owner charge: $150.",
+          "estimated_minutes": 60
+        }
+      ]
+    },
+    {
+      "stage_key": "possession-release",
+      "name": "Possession Release",
+      "description": "Verify lease is signed and all funds are cleared, then release possession by providing keys or lockbox codes.",
+      "steps": [
+        {
+          "task_key": "verify-pre-possession-requirements",
+          "title": "Verify lease signed and all payments cleared",
+          "kind": "human_approval",
+          "assigned_role": "human",
+          "is_automated": false,
+          "depends_on": ["move-in-inspection"],
+          "instructions": "Before releasing possession, confirm: lease agreement is fully signed, all required funds are cleared (holding deposit, security deposit, all move-in charges), all required documents are on file, and the property is move-in ready.",
+          "human_prompt": "Verify before releasing possession: lease fully signed, all funds cleared, all documents on file (renters insurance, pet docs, utility transfer, HOA, PetScreening), and property is move-in ready.",
+          "estimated_minutes": 15
+        },
+        {
+          "task_key": "release-possession",
+          "title": "Release possession with keys or lockbox codes",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["verify-pre-possession-requirements"],
+          "instructions": "Release possession to the tenant by providing keys or lockbox access codes. Document the possession release date and method in AppFolio.",
+          "dispatch_title": "Release possession: provide keys or lockbox codes",
+          "dispatch_body": "Provide keys or lockbox codes to tenant. Document possession release date and method in AppFolio.",
+          "estimated_minutes": 15
+        }
+      ]
+    },
+    {
+      "stage_key": "move-in-follow-up",
+      "name": "Move-In Follow-Up",
+      "description": "72-hour check-in with the new tenant and confirmation of Resident Portal access and utility transfers.",
+      "steps": [
+        {
+          "task_key": "72-hour-check-in",
+          "title": "72-hour move-in check-in with tenant",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["release-possession"],
+          "instructions": "Contact the tenant within 72 hours of move-in to check in on their experience and address any immediate concerns. Confirm they have access to the Resident Portal and that utility transfers are confirmed.",
+          "dispatch_title": "72-hour move-in check-in with new tenant",
+          "dispatch_body": "Contact new tenant within 72 hours of move-in. Check in on experience, address concerns. Confirm Resident Portal access and utility transfer completion. Document responses.",
+          "estimated_minutes": 15
+        }
+      ]
+    }
+  ]
+}

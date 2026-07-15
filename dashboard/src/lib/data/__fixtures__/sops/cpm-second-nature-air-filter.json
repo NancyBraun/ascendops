@@ -1,0 +1,146 @@
+{
+  "slug": "cpm-second-nature-air-filter",
+  "name": "CPM Second Nature Air Filter Management",
+  "description": "Carolinas PM workflow for managing resident HVAC air filter deliveries through the Second Nature program. Covers enrollment at move-in, pausing deliveries for vacant or delinquent units, and resuming deliveries after a new tenant moves in or a pause condition is resolved. All actions documented in AppFolio.",
+  "subject_type": "air_filter_program",
+  "default_start_stage_key": "resident-enrollment",
+  "captured_at": "2026-07-15T00:00:00.000Z",
+  "stages": [
+    {
+      "stage_key": "resident-enrollment",
+      "name": "Resident Enrollment",
+      "description": "Enroll a new resident in the Second Nature air filter delivery program at move-in. Verify HVAC filter size, Resident Benefit Package eligibility, and contact information before portal enrollment.",
+      "steps": [
+        {
+          "task_key": "verify-enrollment-prerequisites",
+          "title": "Verify HVAC filter size, move-in date, and RBP eligibility",
+          "kind": "agent_task",
+          "assigned_role": "maintenance",
+          "is_automated": true,
+          "instructions": "Before enrolling, verify: (1) HVAC filter size for the unit, (2) confirmed resident move-in date, (3) that the resident's Benefit Package (RBP) includes the air filter program. Confirm resident contact information for the Second Nature portal.",
+          "dispatch_title": "Verify air filter enrollment prerequisites",
+          "dispatch_body": "Verify before enrolling in Second Nature: HVAC filter size, confirmed move-in date, RBP includes air filter program, resident contact info. Do not enroll until all confirmed.",
+          "estimated_minutes": 15
+        },
+        {
+          "task_key": "enroll-in-second-nature",
+          "title": "Enroll resident in Second Nature portal",
+          "kind": "agent_task",
+          "assigned_role": "maintenance",
+          "is_automated": true,
+          "depends_on": ["verify-enrollment-prerequisites"],
+          "instructions": "Log in to the Second Nature portal and enroll the resident. Verify the shipping address and the date of the first shipment. Document the enrollment confirmation.",
+          "dispatch_title": "Enroll resident in Second Nature portal",
+          "dispatch_body": "Log in to Second Nature portal. Enroll resident with correct filter size and contact info. Verify shipping address and first shipment date. Document enrollment confirmation.",
+          "estimated_minutes": 15
+        },
+        {
+          "task_key": "document-enrollment-appfolio",
+          "title": "Document enrollment in AppFolio tenant notes",
+          "kind": "agent_task",
+          "assigned_role": "maintenance",
+          "is_automated": true,
+          "depends_on": ["enroll-in-second-nature"],
+          "instructions": "Document the Second Nature enrollment in AppFolio tenant notes: filter size, enrollment date, shipping address, and first shipment date.",
+          "dispatch_title": "Document Second Nature enrollment in AppFolio",
+          "dispatch_body": "Add AppFolio tenant note: Second Nature enrolled, filter size, enrollment date, shipping address, first shipment date.",
+          "estimated_minutes": 10
+        }
+      ]
+    },
+    {
+      "stage_key": "delivery-pause-management",
+      "name": "Delivery Pause Management",
+      "description": "Pause Second Nature deliveries when a unit is vacant, the resident is delinquent or under eviction, or the filter cycle is less than 2 months. Document the pause reason in AppFolio.",
+      "steps": [
+        {
+          "task_key": "identify-pause-condition",
+          "title": "Identify pause condition (vacant, delinquent, or short cycle)",
+          "kind": "human_review",
+          "assigned_role": "human",
+          "is_automated": false,
+          "instructions": "Determine the pause trigger: (1) unit is now vacant, (2) resident is delinquent or under eviction, or (3) the filter delivery cycle is less than 2 months. Confirm the pause should be applied.",
+          "human_prompt": "Confirm pause reason: unit is vacant, resident is delinquent/under eviction, or filter cycle is less than 2 months. Specify which condition applies.",
+          "estimated_minutes": 10
+        },
+        {
+          "task_key": "pause-second-nature-delivery",
+          "title": "Pause deliveries in Second Nature portal",
+          "kind": "agent_task",
+          "assigned_role": "maintenance",
+          "is_automated": true,
+          "depends_on": ["identify-pause-condition"],
+          "instructions": "Log in to the Second Nature portal and pause deliveries for this unit. Record the pause effective date.",
+          "dispatch_title": "Pause Second Nature deliveries for this unit",
+          "dispatch_body": "Log in to Second Nature portal and pause deliveries for this unit. Record pause date.",
+          "estimated_minutes": 10
+        },
+        {
+          "task_key": "document-pause-appfolio",
+          "title": "Document pause reason in AppFolio",
+          "kind": "agent_task",
+          "assigned_role": "maintenance",
+          "is_automated": true,
+          "depends_on": ["pause-second-nature-delivery"],
+          "instructions": "Document the Second Nature delivery pause in AppFolio tenant notes: pause date and reason (vacant, delinquent, eviction, or short cycle).",
+          "dispatch_title": "Document Second Nature pause in AppFolio",
+          "dispatch_body": "Add AppFolio tenant note: Second Nature deliveries paused as of [date], reason: [vacant/delinquent/eviction/short cycle].",
+          "estimated_minutes": 10
+        }
+      ]
+    },
+    {
+      "stage_key": "delivery-resume",
+      "name": "Delivery Resume",
+      "description": "Resume Second Nature deliveries after a new tenant moves in or the pause condition is resolved (rent is current, eviction dropped). Verify all resident information and shipping address before reactivating.",
+      "steps": [
+        {
+          "task_key": "confirm-resume-condition",
+          "title": "Confirm resume condition is met",
+          "kind": "human_review",
+          "assigned_role": "human",
+          "is_automated": false,
+          "instructions": "Confirm the resume trigger: either a new tenant has moved in, or the original pause condition has been resolved (rent is current, eviction proceeding dropped). Verify the unit is occupied and the resident's account is in good standing.",
+          "human_prompt": "Confirm resume trigger: new tenant moved in, or delinquency cleared / eviction resolved. Confirm unit is occupied and account is in good standing.",
+          "estimated_minutes": 10
+        },
+        {
+          "task_key": "verify-resume-info",
+          "title": "Verify shipping address, resident info, and filter size",
+          "kind": "agent_task",
+          "assigned_role": "maintenance",
+          "is_automated": true,
+          "depends_on": ["confirm-resume-condition"],
+          "instructions": "Before reactivating, verify the current shipping address, resident contact information, and HVAC filter size (especially if a new tenant has moved in and the unit size may have changed).",
+          "dispatch_title": "Verify shipping address, resident info, and filter size for resume",
+          "dispatch_body": "Before reactivating: verify current shipping address, resident contact info, and HVAC filter size. Update if a new tenant moved in.",
+          "estimated_minutes": 15
+        },
+        {
+          "task_key": "resume-second-nature-delivery",
+          "title": "Resume deliveries in Second Nature portal",
+          "kind": "agent_task",
+          "assigned_role": "maintenance",
+          "is_automated": true,
+          "depends_on": ["verify-resume-info"],
+          "instructions": "Log in to the Second Nature portal and resume deliveries for this unit with the verified resident information and shipping address. Confirm the next shipment date.",
+          "dispatch_title": "Resume Second Nature deliveries for this unit",
+          "dispatch_body": "Log in to Second Nature portal. Resume deliveries with verified resident info, shipping address, and filter size. Confirm next shipment date.",
+          "estimated_minutes": 15
+        },
+        {
+          "task_key": "document-reactivation-appfolio",
+          "title": "Document reactivation in AppFolio",
+          "kind": "agent_task",
+          "assigned_role": "maintenance",
+          "is_automated": true,
+          "depends_on": ["resume-second-nature-delivery"],
+          "instructions": "Document the Second Nature reactivation in AppFolio tenant notes: reactivation date, confirmed shipping address, filter size, and next shipment date.",
+          "dispatch_title": "Document Second Nature reactivation in AppFolio",
+          "dispatch_body": "Add AppFolio tenant note: Second Nature deliveries reactivated as of [date], shipping address confirmed, filter size, next shipment date.",
+          "estimated_minutes": 10
+        }
+      ]
+    }
+  ]
+}

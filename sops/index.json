@@ -322,6 +322,62 @@
       "subject_type": "appliance_decision",
       "stage_count": 3,
       "task_count": 6
+    },
+    {
+      "slug": "cpm-property-marketing",
+      "name": "CPM Property Marketing",
+      "subject_type": "leasing_listing",
+      "stage_count": 4,
+      "task_count": 11
+    },
+    {
+      "slug": "cpm-owner-property-onboarding",
+      "name": "CPM New Owner And Property Onboarding",
+      "subject_type": "owner_onboarding",
+      "stage_count": 4,
+      "task_count": 11
+    },
+    {
+      "slug": "cpm-move-out-deposit-disposition",
+      "name": "CPM Move-Out To Security Deposit Disposition",
+      "subject_type": "move_out",
+      "stage_count": 5,
+      "task_count": 13
+    },
+    {
+      "slug": "cpm-lease-renewal",
+      "name": "CPM Lease Renewal Process",
+      "subject_type": "lease_renewal",
+      "stage_count": 6,
+      "task_count": 21
+    },
+    {
+      "slug": "cpm-second-nature-air-filter",
+      "name": "CPM Second Nature Air Filter Management",
+      "subject_type": "air_filter_program",
+      "stage_count": 3,
+      "task_count": 10
+    },
+    {
+      "slug": "cpm-inspection-workflows",
+      "name": "CPM Property Inspection Workflows",
+      "subject_type": "property_inspection",
+      "stage_count": 4,
+      "task_count": 9
+    },
+    {
+      "slug": "cpm-hostaway-str-management",
+      "name": "CPM Hostaway Short-Term Rental Management",
+      "subject_type": "str_reservation",
+      "stage_count": 7,
+      "task_count": 17
+    },
+    {
+      "slug": "cpm-application-tenant-onboarding",
+      "name": "CPM Application Screening And Tenant Onboarding",
+      "subject_type": "rental_application",
+      "stage_count": 9,
+      "task_count": 18
     }
   ]
 }

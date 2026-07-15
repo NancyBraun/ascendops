@@ -1,0 +1,165 @@
+{
+  "slug": "cpm-property-marketing",
+  "name": "CPM Property Marketing",
+  "description": "Carolinas PM marketing workflow from PM photography approval through listing publication and campaign launch. Covers Asset Guard 360 photography scheduling, AppFolio listing setup with MLS remarks from Bella, Tenant Turner activation, and CINC/social media blast.",
+  "subject_type": "leasing_listing",
+  "default_start_stage_key": "marketing-initiation",
+  "captured_at": "2026-07-15T00:00:00.000Z",
+  "stages": [
+    {
+      "stage_key": "marketing-initiation",
+      "name": "Marketing Initiation",
+      "description": "Receive PM approval, schedule professional photography via Asset Guard 360, and forward the photography invoice to Accounting.",
+      "steps": [
+        {
+          "task_key": "receive-marketing-approval",
+          "title": "Receive marketing approval from PM",
+          "kind": "human_review",
+          "assigned_role": "pm",
+          "is_automated": false,
+          "human_prompt": "Confirm with the assigned PM that the property is rent-ready and approved for professional marketing photos and showings.",
+          "estimated_minutes": 10
+        },
+        {
+          "task_key": "schedule-photography",
+          "title": "Schedule professional photography via Asset Guard 360",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["receive-marketing-approval"],
+          "instructions": "Schedule the photography appointment through the Asset Guard 360 Realtor Dashboard. Record the confirmed appointment date and monitor until the appointment is completed.",
+          "dispatch_title": "Schedule Asset Guard 360 photography appointment",
+          "dispatch_body": "Schedule professional photography through Asset Guard 360 Realtor Dashboard. Record confirmed appointment date. Monitor until complete. No owner or applicant sends.",
+          "estimated_minutes": 15
+        },
+        {
+          "task_key": "process-photography-invoice",
+          "title": "Forward photography invoice to Accounting",
+          "kind": "agent_task",
+          "assigned_role": "accounting",
+          "is_automated": true,
+          "depends_on": ["schedule-photography"],
+          "instructions": "When the invoice arrives from Asset Guard 360, forward it to Mark (Accounting) for payment processing.",
+          "dispatch_title": "Forward Asset Guard 360 invoice to Mark (Accounting)",
+          "dispatch_body": "Forward Asset Guard 360 photography invoice to Mark (Accounting) for payment. Do not pay directly.",
+          "estimated_minutes": 10
+        }
+      ]
+    },
+    {
+      "stage_key": "listing-preparation",
+      "name": "Listing Preparation",
+      "description": "Update AppFolio with MLS remarks from Bella, upload professional photos, and arrange photo gallery for maximum appeal.",
+      "steps": [
+        {
+          "task_key": "update-appfolio-listing",
+          "title": "Update AppFolio listing with MLS remarks",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "instructions": "Incorporate Bella's MLS marketing remarks into the AppFolio property listing. Update marketing title, property description, rental amount, availability date, features and amenities, pet policy, and any additional PM-provided details. Verify all listing information is complete before publishing.",
+          "dispatch_title": "Update AppFolio listing with MLS remarks from Bella",
+          "dispatch_body": "Update AppFolio listing: Bella's MLS remarks, marketing title, description, rent amount, availability date, amenities, pet policy. Verify completeness. Do not publish yet.",
+          "estimated_minutes": 30
+        },
+        {
+          "task_key": "upload-marketing-photos",
+          "title": "Upload marketing photos to AppFolio and SharePoint",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["update-appfolio-listing"],
+          "instructions": "Once professional photos are received from Asset Guard 360, upload them to AppFolio and the property SharePoint folder. Verify all images uploaded successfully to both locations.",
+          "dispatch_title": "Upload marketing photos to AppFolio and SharePoint",
+          "dispatch_body": "Upload all professional photos to AppFolio property listing and SharePoint property folder. Verify success in both locations. No listing publish yet.",
+          "estimated_minutes": 20
+        },
+        {
+          "task_key": "arrange-marketing-photos",
+          "title": "Arrange photos in AppFolio for maximum appeal",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["upload-marketing-photos"],
+          "instructions": "Arrange photos in AppFolio to maximize marketing appeal: lead with the strongest exterior or interior photo, organize remaining photos as a logical property walkthrough, and highlight the property's best features early in the gallery.",
+          "dispatch_title": "Arrange marketing photos in AppFolio gallery",
+          "dispatch_body": "Arrange AppFolio photo gallery: strongest photo first, logical walkthrough order, highlight best features early. No listing publish.",
+          "estimated_minutes": 20
+        }
+      ]
+    },
+    {
+      "stage_key": "content-distribution",
+      "name": "Content Distribution And Owner Charge",
+      "description": "Share marketing content with Ojo (video) and Bella (MLS upload), and initiate owner billing for marketing expenses via ASANA.",
+      "steps": [
+        {
+          "task_key": "share-content-with-team",
+          "title": "Share photos with Ojo (video) and Bella (MLS)",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["arrange-marketing-photos"],
+          "instructions": "Share the photo folder or links with the marketing team. Request Ojo create a branded marketing video using the professional photos. Request Bella upload the listing and photos to the MLS. Document share confirmations.",
+          "dispatch_title": "Share marketing photos with Ojo and Bella",
+          "dispatch_body": "Share photos with Ojo (request branded marketing video) and Bella (request MLS upload). Document confirmation from both. No direct publishing.",
+          "estimated_minutes": 15
+        },
+        {
+          "task_key": "charge-owner-marketing",
+          "title": "Initiate owner marketing charge via ASANA",
+          "kind": "agent_task",
+          "assigned_role": "accounting",
+          "is_automated": true,
+          "depends_on": ["share-content-with-team"],
+          "instructions": "Create an ASANA task requesting Accounting charge the owner for applicable marketing content per the Property Management Agreement, including professional photography and other approved marketing expenses.",
+          "dispatch_title": "ASANA: Charge owner for marketing content",
+          "dispatch_body": "Create ASANA task for Accounting: charge owner for photography and approved marketing expenses per PMA. Include property address and expense amounts.",
+          "estimated_minutes": 10
+        }
+      ]
+    },
+    {
+      "stage_key": "platform-activation",
+      "name": "Platform Activation And Campaign Launch",
+      "description": "Publish listing in AppFolio, configure Tenant Turner with Seros/SentriLock and Boom link, and launch CINC blast and social media campaign.",
+      "steps": [
+        {
+          "task_key": "publish-appfolio-listing",
+          "title": "Publish property in AppFolio (Post to Internet/Website)",
+          "kind": "human_approval",
+          "assigned_role": "human",
+          "is_automated": false,
+          "depends_on": ["charge-owner-marketing"],
+          "instructions": "Verify listing info, photos, and team notifications are complete. Click Post to Internet/Website in AppFolio and confirm the property syncs to all connected marketing websites.",
+          "human_prompt": "Confirm listing is complete (photos uploaded, MLS remarks in, team notified). Publish via AppFolio Post to Internet/Website and verify sync to all marketing sites.",
+          "estimated_minutes": 15
+        },
+        {
+          "task_key": "configure-tenant-turner",
+          "title": "Configure and activate Tenant Turner listing",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["publish-appfolio-listing"],
+          "instructions": "Once the listing syncs to Tenant Turner: review and update credit requirements; configure showing access method (Seros or SentriLock with correct lockbox serial number assigned by PM); copy the Boom application link and paste into Tenant Turner; activate the listing; verify prospects can schedule showings successfully.",
+          "dispatch_title": "Configure and activate Tenant Turner listing",
+          "dispatch_body": "Configure Tenant Turner: credit requirements, Seros/SentriLock lockbox serial, Boom application link. Activate listing. Verify showing scheduling is live.",
+          "estimated_minutes": 20
+        },
+        {
+          "task_key": "launch-marketing-campaign",
+          "title": "Launch CINC blast and social media campaign",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["configure-tenant-turner"],
+          "instructions": "Request the ISA team perform a CINC blast to prospective leads. Request the marketing team publish the property across company social media platforms. Document all requests and confirmations.",
+          "dispatch_title": "Launch CINC blast and social media campaign",
+          "dispatch_body": "Request ISA team CINC blast and marketing team social posts for this property. Document all confirmations. Campaign should launch immediately after Tenant Turner is active.",
+          "estimated_minutes": 15
+        }
+      ]
+    }
+  ]
+}

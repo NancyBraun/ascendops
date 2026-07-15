@@ -105,6 +105,14 @@ import sop_vendor_coi_verification from './__fixtures__/sops/vendor-coi-verifica
 import sop_vendor_dispatch_offer_lifecycle from './__fixtures__/sops/vendor-dispatch-offer-lifecycle.json';
 import sop_vendor_onboarding from './__fixtures__/sops/vendor-onboarding.json';
 import sop_vendor_performance from './__fixtures__/sops/vendor-performance.json';
+import sop_cpm_property_marketing from './__fixtures__/sops/cpm-property-marketing.json';
+import sop_cpm_owner_property_onboarding from './__fixtures__/sops/cpm-owner-property-onboarding.json';
+import sop_cpm_move_out_deposit_disposition from './__fixtures__/sops/cpm-move-out-deposit-disposition.json';
+import sop_cpm_lease_renewal from './__fixtures__/sops/cpm-lease-renewal.json';
+import sop_cpm_second_nature_air_filter from './__fixtures__/sops/cpm-second-nature-air-filter.json';
+import sop_cpm_inspection_workflows from './__fixtures__/sops/cpm-inspection-workflows.json';
+import sop_cpm_hostaway_str_management from './__fixtures__/sops/cpm-hostaway-str-management.json';
+import sop_cpm_application_tenant_onboarding from './__fixtures__/sops/cpm-application-tenant-onboarding.json';
 
 const FIXTURE_SOPS: Record<string, SopDocument> = {
   'annual-1099': sop_annual_1099 as unknown as SopDocument,
@@ -153,6 +161,14 @@ const FIXTURE_SOPS: Record<string, SopDocument> = {
   'vendor-dispatch-offer-lifecycle': sop_vendor_dispatch_offer_lifecycle as unknown as SopDocument,
   'vendor-onboarding': sop_vendor_onboarding as unknown as SopDocument,
   'vendor-performance': sop_vendor_performance as unknown as SopDocument,
+  'cpm-property-marketing': sop_cpm_property_marketing as unknown as SopDocument,
+  'cpm-owner-property-onboarding': sop_cpm_owner_property_onboarding as unknown as SopDocument,
+  'cpm-move-out-deposit-disposition': sop_cpm_move_out_deposit_disposition as unknown as SopDocument,
+  'cpm-lease-renewal': sop_cpm_lease_renewal as unknown as SopDocument,
+  'cpm-second-nature-air-filter': sop_cpm_second_nature_air_filter as unknown as SopDocument,
+  'cpm-inspection-workflows': sop_cpm_inspection_workflows as unknown as SopDocument,
+  'cpm-hostaway-str-management': sop_cpm_hostaway_str_management as unknown as SopDocument,
+  'cpm-application-tenant-onboarding': sop_cpm_application_tenant_onboarding as unknown as SopDocument,
 };
 
 interface FixtureIndexEntry {

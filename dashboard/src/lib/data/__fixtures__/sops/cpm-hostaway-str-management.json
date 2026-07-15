@@ -1,0 +1,256 @@
+{
+  "slug": "cpm-hostaway-str-management",
+  "name": "CPM Hostaway Short-Term Rental Management",
+  "description": "Carolinas PM short-term rental (STR) workflow managed through Hostaway. Covers reservation intake and guest screening, cleaner and team coordination, maintenance during stays, checkout and damage reporting, platform damage claims, and review policy (leave guest review only after a 5-star guest review is received).",
+  "subject_type": "str_reservation",
+  "default_start_stage_key": "reservation-management",
+  "captured_at": "2026-07-15T00:00:00.000Z",
+  "stages": [
+    {
+      "stage_key": "reservation-management",
+      "name": "Reservation Management",
+      "description": "Review incoming reservation details, verify guests and dates, confirm payment, and confirm the booking source before accepting.",
+      "steps": [
+        {
+          "task_key": "review-reservation-details",
+          "title": "Review reservation details in Hostaway",
+          "kind": "agent_task",
+          "assigned_role": "operations",
+          "is_automated": true,
+          "instructions": "Review the incoming reservation in Hostaway: guest names, number of guests, check-in and check-out dates, confirmed payment status, and booking source (Hostaway direct, VRBO, Airbnb, or other platform). Document all details.",
+          "dispatch_title": "Review reservation details in Hostaway",
+          "dispatch_body": "Review Hostaway reservation: guest names, guest count, dates, payment confirmation, booking source. Document all details.",
+          "estimated_minutes": 15
+        }
+      ]
+    },
+    {
+      "stage_key": "guest-screening",
+      "name": "Guest Screening",
+      "description": "Review guest profile and reviews, send house rules, confirm the code word, and approve or decline the reservation.",
+      "steps": [
+        {
+          "task_key": "review-guest-profile",
+          "title": "Review guest profile and prior reviews",
+          "kind": "agent_task",
+          "assigned_role": "operations",
+          "is_automated": true,
+          "depends_on": ["review-reservation-details"],
+          "instructions": "Review the guest profile and all prior reviews on the booking platform. Flag any red flags (negative reviews, incomplete profile, unusual requests). Document screening findings.",
+          "dispatch_title": "Review guest profile and reviews for screening",
+          "dispatch_body": "Review guest profile and all prior reviews. Flag red flags. Document screening findings.",
+          "estimated_minutes": 15
+        },
+        {
+          "task_key": "send-house-rules",
+          "title": "Send house rules to guest",
+          "kind": "agent_task",
+          "assigned_role": "operations",
+          "is_automated": true,
+          "depends_on": ["review-guest-profile"],
+          "instructions": "Send house rules to the guest. For direct bookings and VRBO bookings, send house rules directly. Confirm that the guest acknowledges receipt.",
+          "dispatch_title": "Send house rules to guest (direct and VRBO bookings)",
+          "dispatch_body": "Send house rules to guest. Confirm acknowledgement. Document send and response.",
+          "estimated_minutes": 10
+        },
+        {
+          "task_key": "confirm-code-word",
+          "title": "Confirm code word from guest",
+          "kind": "agent_task",
+          "assigned_role": "operations",
+          "is_automated": true,
+          "depends_on": ["send-house-rules"],
+          "instructions": "Confirm the required code word from the guest as part of the identity and compliance verification process. Document the confirmation.",
+          "dispatch_title": "Confirm code word from guest",
+          "dispatch_body": "Request and confirm required code word from guest. Document confirmation.",
+          "estimated_minutes": 10
+        },
+        {
+          "task_key": "approve-or-decline-reservation",
+          "title": "Approve or decline reservation",
+          "kind": "human_approval",
+          "assigned_role": "human",
+          "is_automated": false,
+          "depends_on": ["confirm-code-word"],
+          "instructions": "Based on guest screening results (profile, reviews, house rules acknowledgement, code word confirmation), approve or decline the reservation in Hostaway.",
+          "human_prompt": "Review guest screening results (profile, reviews, house rules acknowledged, code word confirmed). Approve or decline reservation.",
+          "estimated_minutes": 10
+        }
+      ]
+    },
+    {
+      "stage_key": "team-coordination",
+      "name": "Team Coordination And Stay Management",
+      "description": "Notify cleaner and coordinate team for the stay, handle rental agreements for extended stays, respond to guest inquiries, and document all issues in Hostaway.",
+      "steps": [
+        {
+          "task_key": "notify-cleaner",
+          "title": "Notify cleaner with reservation dates",
+          "kind": "agent_task",
+          "assigned_role": "operations",
+          "is_automated": true,
+          "depends_on": ["approve-or-decline-reservation"],
+          "instructions": "Text the cleaner with the check-in and check-out dates. Send a calendar invite. For stays of 29 days or more, prepare and send a rental agreement. Include security deposit instructions as applicable.",
+          "dispatch_title": "Notify cleaner: dates, calendar invite, security deposit instructions",
+          "dispatch_body": "Text cleaner with check-in/check-out dates and calendar invite. For 29+ day stays: prepare rental agreement. Include security deposit instructions.",
+          "estimated_minutes": 15
+        },
+        {
+          "task_key": "respond-to-guest-inquiries",
+          "title": "Respond to guest inquiries and document issues",
+          "kind": "agent_task",
+          "assigned_role": "operations",
+          "is_automated": true,
+          "depends_on": ["notify-cleaner"],
+          "instructions": "Respond to all guest inquiries during the stay. Coordinate maintenance if issues arise. Document all communications, issues, and resolutions in Hostaway.",
+          "dispatch_title": "Respond to guest inquiries and document in Hostaway",
+          "dispatch_body": "Respond to all guest inquiries. Coordinate maintenance as needed. Document all communications and issues in Hostaway.",
+          "estimated_minutes": 20
+        }
+      ]
+    },
+    {
+      "stage_key": "maintenance-coordination",
+      "name": "Maintenance During Stay",
+      "description": "When maintenance issues arise during a guest stay, create a task, contact vendor, schedule, update the guest, and document with photos and invoices in Hostaway.",
+      "steps": [
+        {
+          "task_key": "create-maintenance-task",
+          "title": "Create maintenance task for in-stay issue",
+          "kind": "agent_task",
+          "assigned_role": "maintenance",
+          "is_automated": true,
+          "instructions": "Create a maintenance task for the reported issue. Contact the vendor and schedule repair work. Update the guest on the timeline and expected resolution.",
+          "dispatch_title": "Create maintenance task and schedule vendor for in-stay issue",
+          "dispatch_body": "Create maintenance task. Contact vendor, schedule repair, update guest with timeline.",
+          "estimated_minutes": 20
+        },
+        {
+          "task_key": "document-maintenance-hostaway",
+          "title": "Document maintenance with photos and invoices in Hostaway",
+          "kind": "agent_task",
+          "assigned_role": "maintenance",
+          "is_automated": true,
+          "depends_on": ["create-maintenance-task"],
+          "instructions": "After maintenance is complete, document in Hostaway: photos of the issue and repair, vendor invoices, and resolution notes.",
+          "dispatch_title": "Document maintenance completion in Hostaway (photos + invoices)",
+          "dispatch_body": "Document in Hostaway: before/after photos, vendor invoices, resolution notes.",
+          "estimated_minutes": 15
+        }
+      ]
+    },
+    {
+      "stage_key": "checkout-and-damages",
+      "name": "Checkout And Damage Assessment",
+      "description": "Verify guest departure, notify cleaner for turnover, and report any damages or missing items discovered during the turnover.",
+      "steps": [
+        {
+          "task_key": "verify-guest-departure",
+          "title": "Verify guest departure at checkout",
+          "kind": "agent_task",
+          "assigned_role": "operations",
+          "is_automated": true,
+          "instructions": "Verify the guest has departed by the checkout time. Confirm departure in Hostaway.",
+          "dispatch_title": "Verify guest departure at checkout",
+          "dispatch_body": "Confirm guest has departed. Document checkout in Hostaway.",
+          "estimated_minutes": 10
+        },
+        {
+          "task_key": "notify-cleaner-turnover",
+          "title": "Notify cleaner for turnover after checkout",
+          "kind": "agent_task",
+          "assigned_role": "operations",
+          "is_automated": true,
+          "depends_on": ["verify-guest-departure"],
+          "instructions": "Notify the cleaner that the guest has checked out and the unit is ready for turnover. Instruct them to report any damages or missing items discovered during cleaning.",
+          "dispatch_title": "Notify cleaner for turnover and damage report",
+          "dispatch_body": "Notify cleaner: guest has checked out, unit ready for turnover. Request immediate report of any damages or missing items found during cleaning.",
+          "estimated_minutes": 10
+        },
+        {
+          "task_key": "document-damages-missing-items",
+          "title": "Document damages or missing items in Hostaway",
+          "kind": "agent_task",
+          "assigned_role": "operations",
+          "is_automated": true,
+          "depends_on": ["notify-cleaner-turnover"],
+          "instructions": "If the cleaner reports damages or missing items, document them in Hostaway with photos and descriptions. Proceed to the damage claims stage if applicable.",
+          "dispatch_title": "Document damages and missing items in Hostaway",
+          "dispatch_body": "Document all reported damages and missing items in Hostaway with photos and descriptions. Flag for damage claim if applicable.",
+          "estimated_minutes": 15
+        }
+      ]
+    },
+    {
+      "stage_key": "damage-claims",
+      "name": "Damage Claims",
+      "description": "When damages are identified, document with photos and estimates, contact the guest, and submit a platform claim. All claims managed through Hostaway.",
+      "steps": [
+        {
+          "task_key": "gather-damage-evidence",
+          "title": "Gather photos and estimates for damage claim",
+          "kind": "agent_task",
+          "assigned_role": "operations",
+          "is_automated": true,
+          "instructions": "Compile all damage photos and obtain repair estimates or invoices. Document in Hostaway with detailed descriptions of each item.",
+          "dispatch_title": "Gather damage photos and estimates for claim",
+          "dispatch_body": "Compile damage photos, repair estimates, and invoices. Document all in Hostaway with detailed descriptions.",
+          "estimated_minutes": 20
+        },
+        {
+          "task_key": "contact-guest-for-damage",
+          "title": "Contact guest about damages",
+          "kind": "agent_task",
+          "assigned_role": "operations",
+          "is_automated": true,
+          "depends_on": ["gather-damage-evidence"],
+          "instructions": "Contact the guest through the booking platform with documentation of the damages and requested reimbursement. Document the guest's response.",
+          "dispatch_title": "Contact guest about damages with documentation",
+          "dispatch_body": "Contact guest through booking platform: attach damage photos and estimated costs. Document guest response.",
+          "estimated_minutes": 15
+        },
+        {
+          "task_key": "submit-platform-claim",
+          "title": "Submit damage claim through the booking platform",
+          "kind": "human_approval",
+          "assigned_role": "human",
+          "is_automated": false,
+          "depends_on": ["contact-guest-for-damage"],
+          "instructions": "Review gathered damage evidence and guest response, then submit the formal damage claim through the booking platform (Airbnb AirCover, VRBO damage protection, etc.).",
+          "human_prompt": "Review damage evidence, estimates, and guest response. Submit formal damage claim through the booking platform if guest does not resolve directly.",
+          "estimated_minutes": 20
+        }
+      ]
+    },
+    {
+      "stage_key": "post-stay-review",
+      "name": "Post-Stay Guest Review",
+      "description": "Monitor for guest reviews. Leave a review for the guest only after the guest has left a 5-star review first. Monitor all feedback.",
+      "steps": [
+        {
+          "task_key": "monitor-for-guest-review",
+          "title": "Monitor for guest review submission",
+          "kind": "agent_task",
+          "assigned_role": "operations",
+          "is_automated": true,
+          "depends_on": ["verify-guest-departure"],
+          "instructions": "Monitor the booking platform for a guest review submission. Policy: leave a guest review ONLY if the guest leaves a 5-star review first. Do not proactively leave a review or request a specific rating.",
+          "dispatch_title": "Monitor for guest review on booking platform",
+          "dispatch_body": "Monitor for guest review. Leave a review ONLY if guest leaves 5-star review first. Do not review first or request a specific rating.",
+          "estimated_minutes": 10
+        },
+        {
+          "task_key": "leave-guest-review-if-5-star",
+          "title": "Leave guest review after receiving 5-star rating",
+          "kind": "human_approval",
+          "assigned_role": "human",
+          "is_automated": false,
+          "depends_on": ["monitor-for-guest-review"],
+          "instructions": "If the guest has left a 5-star review, compose and submit a positive review for the guest on the booking platform. If the review is less than 5 stars, do not leave a reciprocal review without PM direction.",
+          "human_prompt": "Guest left a 5-star review. Compose and submit a guest review on the platform if appropriate.",
+          "estimated_minutes": 10
+        }
+      ]
+    }
+  ]
+}

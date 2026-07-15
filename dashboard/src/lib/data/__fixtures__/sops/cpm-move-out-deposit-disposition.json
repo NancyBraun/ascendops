@@ -1,0 +1,194 @@
+{
+  "slug": "cpm-move-out-deposit-disposition",
+  "name": "CPM Move-Out To Security Deposit Disposition",
+  "description": "Carolinas PM move-out workflow from non-renewal notice through security deposit disposition. Covers Monday.com/AppFolio status updates, pre-marketing (COMING SOON!), Realm-X walkthrough coordination, unit turn, PM charge determination, and NC-compliant SD disposition within 30-day (interim) and 60-day (final) statutory deadlines.",
+  "subject_type": "move_out",
+  "default_start_stage_key": "non-renewal-intake",
+  "captured_at": "2026-07-15T00:00:00.000Z",
+  "stages": [
+    {
+      "stage_key": "non-renewal-intake",
+      "name": "Non-Renewal Intake",
+      "description": "Update Monday.com to Non-Renewal (triggers tenant move-out instructions and owner notification), process move-out in AppFolio, and request market rent from PM.",
+      "steps": [
+        {
+          "task_key": "update-monday-non-renewal",
+          "title": "Update Monday.com to Non-Renewal status",
+          "kind": "agent_task",
+          "assigned_role": "operations",
+          "is_automated": true,
+          "instructions": "Change the lease renewal status to Non-Renewal in Monday.com. This automation sends move-out instructions to the tenant and notifies the property owner that the tenant will be vacating.",
+          "dispatch_title": "Update Monday.com lease status to Non-Renewal",
+          "dispatch_body": "Change Monday.com status to Non-Renewal. Verify automation fires: move-out instructions to tenant and owner notification of vacancy.",
+          "estimated_minutes": 10
+        },
+        {
+          "task_key": "process-move-out-appfolio",
+          "title": "Process move-out in AppFolio",
+          "kind": "agent_task",
+          "assigned_role": "operations",
+          "is_automated": true,
+          "depends_on": ["update-monday-non-renewal"],
+          "instructions": "Navigate to the tenant's page in AppFolio: Tasks > Move-Out Tenant. Enter the Date Notice Received, Reason for Move-Out, and Move-Out Date. Save the move-out details.",
+          "dispatch_title": "Process move-out in AppFolio (Tasks > Move-Out Tenant)",
+          "dispatch_body": "AppFolio: tenant page > Tasks > Move-Out Tenant. Enter notice date, reason for move-out, and move-out date. Save.",
+          "estimated_minutes": 15
+        },
+        {
+          "task_key": "request-pm-market-rent",
+          "title": "Request market rent and leasing instructions from PM",
+          "kind": "agent_task",
+          "assigned_role": "operations",
+          "is_automated": true,
+          "depends_on": ["process-move-out-appfolio"],
+          "instructions": "Email the assigned PM requesting an updated market rent recommendation and any additional leasing instructions for re-marketing the property. Pre-marketing should begin immediately upon PM response.",
+          "dispatch_title": "Request market rent and leasing instructions from PM",
+          "dispatch_body": "Email assigned PM: request updated market rent and leasing instructions for re-marketing. Note that pre-marketing begins immediately on their response.",
+          "estimated_minutes": 10
+        }
+      ]
+    },
+    {
+      "stage_key": "pre-marketing",
+      "name": "Pre-Marketing Setup",
+      "description": "Once PM provides market rent, update AppFolio with COMING SOON! listing and configure Tenant Turner for pre-marketing visibility.",
+      "steps": [
+        {
+          "task_key": "receive-pm-market-rent",
+          "title": "Receive PM market rent and leasing instructions",
+          "kind": "human_review",
+          "assigned_role": "pm",
+          "is_automated": false,
+          "depends_on": ["request-pm-market-rent"],
+          "human_prompt": "Provide updated market rent recommendation and any special leasing instructions for re-marketing this property.",
+          "estimated_minutes": 30
+        },
+        {
+          "task_key": "update-appfolio-coming-soon",
+          "title": "Update AppFolio listing as COMING SOON!",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["receive-pm-market-rent"],
+          "instructions": "Update the AppFolio property page with: Market Rent (from PM recommendation), Availability Date, and Marketing Title. Include COMING SOON! at the beginning of the marketing title.",
+          "dispatch_title": "Update AppFolio with COMING SOON! pre-marketing listing",
+          "dispatch_body": "Update AppFolio property page: market rent from PM, availability date, marketing title starting with 'COMING SOON!'. Do not publish as live listing.",
+          "estimated_minutes": 20
+        },
+        {
+          "task_key": "configure-tenant-turner-coming-soon",
+          "title": "Configure Tenant Turner as COMING SOON",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["update-appfolio-coming-soon"],
+          "instructions": "In Tenant Turner: review and update credit requirements if applicable; copy the Boom application link and paste into Tenant Turner; publish the property as COMING SOON.",
+          "dispatch_title": "Configure Tenant Turner as COMING SOON",
+          "dispatch_body": "Tenant Turner: update credit requirements if needed, paste Boom application link, publish as COMING SOON.",
+          "estimated_minutes": 15
+        }
+      ]
+    },
+    {
+      "stage_key": "pre-move-out-coordination",
+      "name": "Pre-Move-Out Coordination",
+      "description": "Coordinate Realm-X pre-move-out walkthrough at 30 days and tenant key reminders and move-out evaluation scheduling at 7 days before vacating.",
+      "steps": [
+        {
+          "task_key": "confirm-realm-x-walkthrough",
+          "title": "Confirm Realm-X pre-move-out walkthrough initiation",
+          "kind": "agent_task",
+          "assigned_role": "operations",
+          "is_automated": true,
+          "instructions": "At 30 days before move-out, confirm Realm-X has automatically initiated the pre-move-out walkthrough process: tenant notified that PM will contact them to schedule, and PM reminded to coordinate scheduling. Refer to Inspection SOP for the complete walkthrough procedure.",
+          "dispatch_title": "Confirm Realm-X pre-move-out walkthrough is initiated",
+          "dispatch_body": "Verify Realm-X 30-day pre-move-out process is active: tenant notification sent, PM reminder sent. Document confirmation.",
+          "estimated_minutes": 10
+        },
+        {
+          "task_key": "schedule-move-out-evaluation",
+          "title": "Schedule move-out evaluation with field rep",
+          "kind": "agent_task",
+          "assigned_role": "operations",
+          "is_automated": true,
+          "depends_on": ["confirm-realm-x-walkthrough"],
+          "instructions": "Within 7 days of the move-out date, schedule the Move-Out Evaluation with the assigned field representative. Confirm Realm-X is sending recurring tenant reminders about leaving a key in a secure hidden location before vacating. Refer to Move-Out Evaluation Process in Inspection SOP for complete procedure.",
+          "dispatch_title": "Schedule move-out evaluation with field rep (7 days out)",
+          "dispatch_body": "Schedule Move-Out Evaluation with assigned field rep within 7 days of move-out date. Confirm Realm-X tenant key reminders are active.",
+          "estimated_minutes": 15
+        }
+      ]
+    },
+    {
+      "stage_key": "unit-turn-and-charges",
+      "name": "Unit Turn And Charge Determination",
+      "description": "Coordinate full unit turn after possession is returned, then PM reviews all repairs and determines charges exceeding normal wear and tear.",
+      "steps": [
+        {
+          "task_key": "coordinate-unit-turn",
+          "title": "Coordinate unit turn with maintenance team",
+          "kind": "agent_task",
+          "assigned_role": "maintenance",
+          "is_automated": true,
+          "instructions": "Once the tenant has vacated and possession is returned, coordinate the full unit turn with the Maintenance Team and PM. Includes repair work, cleaning, vendor coordination, and final property preparation for the next resident. Document all work orders, costs, and vendor invoices.",
+          "dispatch_title": "Coordinate unit turn after tenant vacates",
+          "dispatch_body": "Coordinate full unit turn: repairs, cleaning, vendor scheduling, final prep. Document all work orders, costs, and invoices.",
+          "estimated_minutes": 90
+        },
+        {
+          "task_key": "pm-charge-determination",
+          "title": "PM determines charges beyond normal wear and tear",
+          "kind": "human_review",
+          "assigned_role": "pm",
+          "is_automated": false,
+          "depends_on": ["coordinate-unit-turn"],
+          "instructions": "Review all unit turn repairs and determine which charges exceed normal wear and tear. Examples: property damage, missing items, unauthorized alterations, lease violations resulting in repair costs.",
+          "human_prompt": "Review all unit turn repairs and invoices. Determine which charges exceed normal wear and tear (damage, missing items, unauthorized alterations, lease violation costs). Provide approved charge list for SD disposition.",
+          "estimated_minutes": 30
+        },
+        {
+          "task_key": "submit-charges-to-apm",
+          "title": "Submit PM-approved charges to APM for SD processing",
+          "kind": "agent_task",
+          "assigned_role": "accounting",
+          "is_automated": true,
+          "depends_on": ["pm-charge-determination"],
+          "instructions": "Request the APM (Anna/Accounting) add all PM-approved move-out charges to the tenant's move-out ledger for Security Deposit disposition processing.",
+          "dispatch_title": "Submit tenant move-out charges to APM for SD ledger",
+          "dispatch_body": "Request APM add PM-approved charges to tenant move-out ledger for Security Deposit processing. Include itemized approved charge list.",
+          "estimated_minutes": 15
+        }
+      ]
+    },
+    {
+      "stage_key": "security-deposit-disposition",
+      "name": "Security Deposit Disposition",
+      "description": "Prepare and deliver SD disposition per North Carolina law: interim accounting or final disposition within 30 days, finalized with all deductions within 60 days of vacating.",
+      "steps": [
+        {
+          "task_key": "prepare-30-day-accounting",
+          "title": "Provide interim accounting or final SD within 30 days",
+          "kind": "agent_task",
+          "assigned_role": "accounting",
+          "is_automated": true,
+          "depends_on": ["submit-charges-to-apm"],
+          "instructions": "Within 30 days of the tenant vacating, provide either the Final Security Deposit Disposition or an Interim Accounting if all damages or vendor invoices are not yet finalized. NC law requires one of these within 30 days.",
+          "dispatch_title": "Prepare 30-day SD interim accounting or final disposition (NC law)",
+          "dispatch_body": "Within 30 days of tenant vacating: provide Final SD Disposition OR Interim Accounting if invoices not yet finalized. NC law requires one within 30 days. Document compliance.",
+          "estimated_minutes": 30
+        },
+        {
+          "task_key": "finalize-sd-disposition",
+          "title": "Approve and send final SD disposition (within 60 days)",
+          "kind": "human_approval",
+          "assigned_role": "human",
+          "is_automated": false,
+          "depends_on": ["prepare-30-day-accounting"],
+          "instructions": "Within 60 days of the tenant vacating, finalize the Security Deposit Disposition including all deductions, final accounting, and any remaining refund due to the tenant. NC law requires finalization within 60 days.",
+          "human_prompt": "Review and approve Final Security Deposit Disposition. All deductions, invoices, and refund calculation must be finalized within 60 days of tenant vacating per NC law.",
+          "estimated_minutes": 30
+        }
+      ]
+    }
+  ]
+}

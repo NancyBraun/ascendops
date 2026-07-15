@@ -1,0 +1,296 @@
+{
+  "slug": "cpm-lease-renewal",
+  "name": "CPM Lease Renewal Process",
+  "description": "Carolinas PM lease renewal workflow from 120-day owner intent email through executed renewal agreement. Covers PM recommendation at 90 days, Stop Loss pre-renewal inspection at 85-60 days, PM approval, AppFolio lease preparation, and post-execution documentation and accounting notifications.",
+  "subject_type": "lease_renewal",
+  "default_start_stage_key": "owner-intent",
+  "captured_at": "2026-07-15T00:00:00.000Z",
+  "stages": [
+    {
+      "stage_key": "owner-intent",
+      "name": "Owner Renewal Intent (120 Days Out)",
+      "description": "At 120 days before lease expiration, Monday.com automatically emails the owner to determine renewal plans.",
+      "steps": [
+        {
+          "task_key": "confirm-owner-intent-email",
+          "title": "Confirm Monday.com sent 120-day owner intent email",
+          "kind": "agent_task",
+          "assigned_role": "operations",
+          "is_automated": true,
+          "instructions": "At 120 days before lease expiration, confirm Monday.com automation sent the owner renewal intent email asking whether they intend to continue renting, sell, move back in, or self-manage. Document confirmation and owner response when received.",
+          "dispatch_title": "Confirm 120-day owner renewal intent email was sent",
+          "dispatch_body": "Verify Monday.com sent 120-day owner renewal intent email. Document confirmation. Monitor for owner response (continue renting, sell, move back in, or self-manage).",
+          "estimated_minutes": 10
+        },
+        {
+          "task_key": "owner-intent-decision",
+          "title": "Review owner renewal intent decision",
+          "kind": "human_review",
+          "assigned_role": "owner",
+          "is_automated": false,
+          "depends_on": ["confirm-owner-intent-email"],
+          "human_prompt": "Review owner response to renewal intent email. If owner intends to continue renting, proceed with renewal process. If selling, vacating, or self-managing, initiate move-out planning instead.",
+          "estimated_minutes": 20
+        }
+      ]
+    },
+    {
+      "stage_key": "pm-recommendation",
+      "name": "PM Recommendation And Owner Notification (90-87 Days Out)",
+      "description": "Request PM renewal recommendation at 90 days, then Monday.com notifies owner of proposed renewal amount at 87 days.",
+      "steps": [
+        {
+          "task_key": "request-pm-recommendation",
+          "title": "Request renewal recommendation from PM (90 days out)",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["owner-intent-decision"],
+          "instructions": "Email the assigned PM with the tenant's lease history, payment history, maintenance history, previous inspection results, and other relevant tenancy information. Request: proposed renewal rent amount, lease term (1-year or 2-year), and any special renewal conditions. PM should respond within 3 days.",
+          "dispatch_title": "Request PM renewal recommendation (90 days before expiration)",
+          "dispatch_body": "Email PM with: tenant lease history, payment history, maintenance history, inspection results. Request: proposed rent, term (1 or 2 year), special conditions. PM should respond within 3 days.",
+          "estimated_minutes": 20
+        },
+        {
+          "task_key": "pm-recommendation-review",
+          "title": "Receive PM renewal recommendation",
+          "kind": "human_review",
+          "assigned_role": "pm",
+          "is_automated": false,
+          "depends_on": ["request-pm-recommendation"],
+          "human_prompt": "Provide renewal recommendation: proposed rent amount, lease term (1-year or 2-year), and any special conditions or concerns about this tenant.",
+          "estimated_minutes": 30
+        },
+        {
+          "task_key": "update-monday-renewal-details",
+          "title": "Update Monday.com Lease Renewal Board with proposed terms",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["pm-recommendation-review"],
+          "instructions": "Update the Monday.com Lease Renewal Board with the PM's proposed renewal details: rent amount, lease term, and any special conditions. This information will be used for the 87-day owner notification.",
+          "dispatch_title": "Update Monday.com Lease Renewal Board with PM's proposed terms",
+          "dispatch_body": "Update Monday.com Lease Renewal Board: PM's proposed rent, term, and conditions.",
+          "estimated_minutes": 10
+        },
+        {
+          "task_key": "confirm-87-day-owner-notification",
+          "title": "Confirm Monday.com sent 87-day owner renewal notification",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["update-monday-renewal-details"],
+          "instructions": "Confirm Monday.com automatically sent the owner the proposed renewal amount, lease term, and a request asking whether they are willing to offer the tenant a 2-year lease renewal at 87 days before expiration.",
+          "dispatch_title": "Confirm 87-day owner renewal amount notification was sent",
+          "dispatch_body": "Verify Monday.com sent 87-day owner notification with proposed renewal amount and 2-year term inquiry. Document confirmation.",
+          "estimated_minutes": 10
+        }
+      ]
+    },
+    {
+      "stage_key": "tenant-offer-and-inspection",
+      "name": "Tenant Renewal Offer And Inspection Scheduling (85 Days Out)",
+      "description": "At 85 days, Monday.com sends tenant the renewal offer, then schedule Stop Loss pre-renewal survey and monitor tenant responses.",
+      "steps": [
+        {
+          "task_key": "confirm-85-day-tenant-offer",
+          "title": "Confirm Monday.com sent 85-day tenant renewal offer",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["confirm-87-day-owner-notification"],
+          "instructions": "Confirm Monday.com automatically sent the tenant the lease renewal offer at 85 days before expiration, asking whether they intend to renew or vacate at lease expiration.",
+          "dispatch_title": "Confirm 85-day tenant renewal offer was sent",
+          "dispatch_body": "Verify Monday.com sent 85-day tenant renewal offer (renew or vacate). Document confirmation.",
+          "estimated_minutes": 10
+        },
+        {
+          "task_key": "schedule-stop-loss-inspection",
+          "title": "Submit properties to Stop Loss for pre-renewal survey",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["confirm-85-day-tenant-offer"],
+          "instructions": "Email Stop Loss with the list of properties requiring a Pre-Lease Renewal Property Survey. Stop Loss typically begins scheduling 2-3 weeks after receiving the list.",
+          "dispatch_title": "Submit property to Stop Loss for Pre-Lease Renewal Property Survey",
+          "dispatch_body": "Email Stop Loss: include this property on the pre-renewal survey list. Note: Stop Loss begins scheduling 2-3 weeks after receipt.",
+          "estimated_minutes": 15
+        },
+        {
+          "task_key": "monitor-tenant-response",
+          "title": "Monitor tenant renewal response and adjust inspection list",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["schedule-stop-loss-inspection"],
+          "instructions": "Monitor tenant response to the renewal offer. If tenant intends to renew, proceed with the pre-renewal property survey. If tenant declines: if not yet submitted to Stop Loss, remove from the inspection list; if already submitted, notify Stop Loss immediately and request cancellation.",
+          "dispatch_title": "Monitor tenant renewal response and manage Stop Loss inspection list",
+          "dispatch_body": "Monitor tenant response. If renewing: proceed with Stop Loss survey. If declining: remove from Stop Loss list (or cancel if already submitted). Document outcome.",
+          "estimated_minutes": 20
+        }
+      ]
+    },
+    {
+      "stage_key": "inspection-review",
+      "name": "Inspection Review And PM Approval (60-65 Days Out)",
+      "description": "Download and summarize Stop Loss report, get PM approval, address any tenant issues, upload documentation, and charge owner for inspection and smoke detector work.",
+      "steps": [
+        {
+          "task_key": "review-stop-loss-report",
+          "title": "Download and summarize Stop Loss inspection report",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "instructions": "Download the completed Pre-Lease Renewal Property Survey from the Stop Loss Dashboard. Use AI summarization to generate a concise summary of inspection findings for PM review.",
+          "dispatch_title": "Download and summarize Stop Loss pre-renewal inspection report",
+          "dispatch_body": "Download Stop Loss report from dashboard. Generate concise AI summary of findings. No tenant or owner sends yet.",
+          "estimated_minutes": 20
+        },
+        {
+          "task_key": "request-pm-inspection-approval",
+          "title": "Email PM summarized report and request renewal approval",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["review-stop-loss-report"],
+          "instructions": "Email the summarized inspection report to the assigned PM and ask whether they approve renewing the tenant based on the inspection results.",
+          "dispatch_title": "Request PM approval to renew tenant after inspection review",
+          "dispatch_body": "Email PM: attach AI-summarized inspection report. Request decision on renewing tenant based on findings.",
+          "estimated_minutes": 10
+        },
+        {
+          "task_key": "pm-renewal-approval",
+          "title": "PM approves or declines tenant renewal",
+          "kind": "human_approval",
+          "assigned_role": "pm",
+          "is_automated": false,
+          "depends_on": ["request-pm-inspection-approval"],
+          "instructions": "Review the inspection summary and decide whether to approve the tenant renewal. If there are issues requiring tenant action (dirty HVAC filters, lease violations, landscaping, housekeeping), specify what corrective action is needed before approval.",
+          "human_prompt": "Review inspection summary. Approve tenant renewal or specify required tenant corrections (HVAC filters, lease violations, landscaping, housekeeping, etc.) before proceeding.",
+          "estimated_minutes": 30
+        },
+        {
+          "task_key": "address-tenant-inspection-issues",
+          "title": "Send tenant notice for inspection issues (if required)",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["pm-renewal-approval"],
+          "instructions": "If the PM identified issues requiring tenant action, send the appropriate notice requesting the tenant correct them. Monitor compliance and confirm issues are resolved before proceeding with the renewal agreement.",
+          "dispatch_title": "Send tenant notice for inspection issues if required",
+          "dispatch_body": "If PM specified tenant issues: send appropriate notice. Monitor compliance. Document resolution before renewal agreement is prepared.",
+          "estimated_minutes": 20
+        },
+        {
+          "task_key": "upload-inspection-report",
+          "title": "Upload inspection report to AppFolio and SharePoint",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["pm-renewal-approval"],
+          "instructions": "Upload the complete Stop Loss inspection report to AppFolio (tenant page notes) and SharePoint property folder. Share the inspection report with the property owner through the AppFolio Owner Portal. Post the inspection summary in the tenant's AppFolio notes.",
+          "dispatch_title": "Upload Stop Loss report to AppFolio, SharePoint, and owner portal",
+          "dispatch_body": "Upload full Stop Loss report to AppFolio property page, SharePoint folder, and share via AppFolio Owner Portal. Post summary in tenant AppFolio notes.",
+          "estimated_minutes": 20
+        },
+        {
+          "task_key": "charge-owner-inspection",
+          "title": "Charge owner for inspection and smoke detector work",
+          "kind": "agent_task",
+          "assigned_role": "accounting",
+          "is_automated": true,
+          "depends_on": ["upload-inspection-report"],
+          "instructions": "Request APM charge the owner: Pre-Lease Renewal Property Survey Fee $150, plus $20 CPM markup per smoke detector replacement or installation from the Stop Loss invoice. Request APM charge tenant $25 if smoke detector batteries were replaced.",
+          "dispatch_title": "Charge owner and tenant for Stop Loss inspection fees",
+          "dispatch_body": "APM charges: owner $150 inspection fee + $20 markup per smoke detector replacement/installation. Tenant $25 if batteries replaced. Reference Stop Loss invoice for itemization.",
+          "estimated_minutes": 15
+        }
+      ]
+    },
+    {
+      "stage_key": "agreement-preparation",
+      "name": "Lease Renewal Agreement Preparation",
+      "description": "Once PM approves renewal and inspection is satisfactory, prepare and send the lease renewal agreement via AppFolio with Realm-X automated follow-up.",
+      "steps": [
+        {
+          "task_key": "prepare-renewal-agreement",
+          "title": "Prepare lease renewal agreement in AppFolio",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["charge-owner-inspection", "address-tenant-inspection-issues"],
+          "instructions": "Navigate to AppFolio Dashboard > Leasing > Renewals. Locate the property and tenant. Click Prepare Renewal Offer. Update the renewal information per the PM's approved offer: monthly rent, lease term, recurring charges, and other applicable fees. Review the agreement carefully.",
+          "dispatch_title": "Prepare lease renewal agreement in AppFolio",
+          "dispatch_body": "AppFolio: Dashboard > Leasing > Renewals > find property/tenant > Prepare Renewal Offer. Enter PM-approved rent, term, charges. Review carefully before sending.",
+          "estimated_minutes": 25
+        },
+        {
+          "task_key": "send-renewal-agreement",
+          "title": "Send renewal agreement and confirm Realm-X follow-up",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["prepare-renewal-agreement"],
+          "instructions": "Click Send Agreement in AppFolio. Confirm the tenant is automatically enrolled in the Realm-X workflow that sends daily reminders until the agreement is signed.",
+          "dispatch_title": "Send renewal agreement via AppFolio and confirm Realm-X follow-up",
+          "dispatch_body": "Click Send Agreement in AppFolio. Confirm tenant is enrolled in Realm-X daily reminders. Document send confirmation.",
+          "estimated_minutes": 10
+        }
+      ]
+    },
+    {
+      "stage_key": "post-execution",
+      "name": "Post-Execution Documentation And Notifications",
+      "description": "After the renewal agreement is signed, upload and share the executed agreement, notify Accounting for renewal fees, and update Monday.com to trigger owner and team notifications.",
+      "steps": [
+        {
+          "task_key": "upload-executed-renewal",
+          "title": "Upload executed renewal agreement to AppFolio and SharePoint",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "instructions": "Upload the signed Lease Renewal Agreement to the tenant's AppFolio page and the property's SharePoint folder.",
+          "dispatch_title": "Upload executed renewal agreement to AppFolio and SharePoint",
+          "dispatch_body": "Upload signed renewal agreement to AppFolio tenant page and SharePoint property folder.",
+          "estimated_minutes": 15
+        },
+        {
+          "task_key": "share-renewal-with-tenant",
+          "title": "Share executed agreement with tenant via AppFolio",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["upload-executed-renewal"],
+          "instructions": "Share the fully executed Lease Renewal Agreement with the tenant through AppFolio.",
+          "dispatch_title": "Share executed renewal agreement with tenant via AppFolio",
+          "dispatch_body": "Share executed renewal agreement with tenant through AppFolio portal.",
+          "estimated_minutes": 10
+        },
+        {
+          "task_key": "notify-accounting-renewal-fees",
+          "title": "Notify APM for renewal fee billing",
+          "kind": "agent_task",
+          "assigned_role": "accounting",
+          "is_automated": true,
+          "depends_on": ["upload-executed-renewal"],
+          "instructions": "Inform the APM that the renewal has been completed and request the applicable renewal fees be charged to both the owner and the tenant.",
+          "dispatch_title": "Notify APM: renewal complete, bill renewal fees",
+          "dispatch_body": "Inform APM: renewal agreement executed. Request applicable renewal fees charged to owner and tenant per PMA.",
+          "estimated_minutes": 10
+        },
+        {
+          "task_key": "update-monday-renewal-status",
+          "title": "Update Monday.com renewal status to finalized",
+          "kind": "agent_task",
+          "assigned_role": "leasing",
+          "is_automated": true,
+          "depends_on": ["notify-accounting-renewal-fees"],
+          "instructions": "Update the Monday.com lease renewal status to Renewal (1-Year Term) or Renewal (2-Year Term) as appropriate. This automatically sends notification emails to the property owner and the internal team confirming the lease renewal is complete.",
+          "dispatch_title": "Update Monday.com to Renewal (1-Year or 2-Year Term)",
+          "dispatch_body": "Update Monday.com status to Renewal (1-Year Term) or Renewal (2-Year Term). Verify automation sends owner + team confirmation emails.",
+          "estimated_minutes": 10
+        }
+      ]
+    }
+  ]
+}
