@@ -38,7 +38,7 @@ function loadTelnyxCreds(): TelnyxCreds {
   const fromNumber = raw.from_number?.trim();
   if (!fromNumber) {
     throw new Error(
-      `.from_number missing in ${TELNYX_CREDS} — add your Telnyx-provisioned E.164 number (e.g. "from_number": "+15551234567") to the same file that holds api_key`,
+      `.from_number missing in ${TELNYX_CREDS} — add your Telnyx-provisioned E.164 number (e.g. "from_number": "+12025550143") to the same file that holds api_key`,
     );
   }
   return { apiKey, fromNumber };

@@ -1398,7 +1398,7 @@ busCommand
 busCommand
   .command('send-sms')
   .description('Send an outbound SMS via Telnyx. Safe-by-default: preview only unless --send-real and --approved-by are both set.')
-  .argument('<to-e164>', 'Recipient phone number in E.164 format, e.g. +16145551212')
+  .argument('<to-e164>', 'Recipient phone number in E.164 format, e.g. +12025550142')
   .argument('<text>', 'SMS body text')
   .option('--send-real', 'Actually send the SMS. Requires --approved-by <approval_id>.', false)
   .option('--approved-by <approval-id>', 'Approved external-comms approval id required for live sends')

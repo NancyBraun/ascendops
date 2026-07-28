@@ -13,7 +13,7 @@ triggers: ["triage meld", "classify meld", "triage rules", "how urgent", "should
 
 **New work orders** (same-day emails, fresh meld submissions): Triage immediately — read the meld, classify urgency, post a PM message or alert David as needed. **Never bulk-label and queue a fresh work order.**
 
-**Old notification emails** (historical backlog, activity on existing melds, same-day notifications for melds you've already processed): Bulk-label `blue-processed` and mark read. No triage required.
+**Old notification emails** (historical backlog, activity on existing melds, same-day notifications for melds you've already processed): Apply the label configured by `config.gmail_watch.processed_label_id` and mark read. The matching `gmail_watch.query` must include `-label:<processed-label-name>`. No triage required.
 
 **How to distinguish**: Check the email date. Same-day = immediate triage. Older = bulk label.
 

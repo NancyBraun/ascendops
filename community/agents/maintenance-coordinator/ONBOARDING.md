@@ -190,7 +190,7 @@ Write to `.env`:
 ```
 TWILIO_ACCOUNT_SID=<sid>
 TWILIO_AUTH_TOKEN=<token>
-TWILIO_FROM_NUMBER=<+15551234567>
+TWILIO_FROM_NUMBER=<+12025550143>
 ```
 
 If SMS via Telnyx:
@@ -200,7 +200,7 @@ I'll need your Telnyx API key and the From-number.
 Write to `.env`:
 ```
 TELNYX_API_KEY=<key>
-TELNYX_FROM_NUMBER=<+15551234567>
+TELNYX_FROM_NUMBER=<+12025550143>
 ```
 
 If neither: continue Telegram-only and note in `SYSTEM.md` that outbound SMS is not configured.

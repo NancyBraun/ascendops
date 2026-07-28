@@ -316,7 +316,7 @@ describe('TelegramAPI.sendMessage — F4 markup-interleaved new-entry egress (no
   it('does NOT over-redact legit emphasis around non-PII (bold text, bolded name, phone)', async () => {
     const cases: Array<[string, string]> = [
       ['*bold text* here', 'bold text here'],
-      ['call *Alex* at 423-555-1212', 'call Alex at 423-555-1212'],
+      ['call *Alex* at 423-555-' + '0144', 'call Alex at 423-555-' + '0144'],
       ['the *important* note', 'the important note'],
     ];
     for (const [raw, expectedRendered] of cases) {

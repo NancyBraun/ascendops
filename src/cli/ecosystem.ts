@@ -10,7 +10,6 @@ export const ecosystemCommand = new Command('ecosystem')
   .option('--output <path>', 'Output file', 'ecosystem.config.js')
   .description('Generate PM2 ecosystem.config.js from agent configs')
   .action(async (options: { instance: string; org?: string; output: string }) => {
-    const ctxRoot = join(homedir(), '.cortextos', options.instance);
     // BUG-035 (companion fix): same project-root discovery as enable-agent.ts
     // so `cortextos ecosystem` works from outside ~/cortextos.
     let projectRoot: string;
@@ -52,9 +51,6 @@ export const ecosystemCommand = new Command('ecosystem')
       return;
     }
 
-    // Use dist/ in project root for all scripts
-    const distDir = join(projectRoot, 'dist');
-    const daemonScript = join(distDir, 'daemon.js');
     const dashboardDir = join(projectRoot, 'dashboard');
     // BUG-019 + cycle-2 finding: require BOTH package.json AND node_modules/.bin/next.
     // Without the second check, running `cortextos ecosystem` before
@@ -95,7 +91,7 @@ export const ecosystemCommand = new Command('ecosystem')
       name: 'cortextos-dashboard',
       script: ${JSON.stringify(dashboardScript)},
       args: ${JSON.stringify(dashboardArgs)},
-      cwd: ${JSON.stringify(dashboardDir)},
+      cwd: path.join(frameworkRoot, 'dashboard'),
       env: {
         PORT: process.env.PORT || '3000',
       },
@@ -114,18 +110,23 @@ export const ecosystemCommand = new Command('ecosystem')
 // Note: env vars use process.env.X || 'default' so PM2 picks up the value
 // from the calling shell at startup time. This means \`CTX_INSTANCE_ID=foo
 // pm2 restart cortextos-daemon\` switches instances without regenerating.
+const path = require('path');
+const frameworkRoot = process.env.CTX_FRAMEWORK_ROOT || __dirname;
+const instanceId = process.env.CTX_INSTANCE_ID || ${JSON.stringify(options.instance)};
+const ctxRoot = process.env.CTX_ROOT || path.join(process.env.HOME || frameworkRoot, '.cortextos', instanceId);
+
 module.exports = {
   apps: [
     {
       name: 'cortextos-daemon',
-      script: ${JSON.stringify(daemonScript)},
-      args: '--instance ' + (process.env.CTX_INSTANCE_ID || ${JSON.stringify(options.instance)}),
-      cwd: ${JSON.stringify(projectRoot)},
+      script: path.join(frameworkRoot, 'dist', 'daemon.js'),
+      args: '--instance ' + instanceId,
+      cwd: frameworkRoot,
       env: {
-        CTX_INSTANCE_ID: process.env.CTX_INSTANCE_ID || ${JSON.stringify(options.instance)},
-        CTX_ROOT: process.env.CTX_ROOT || ${JSON.stringify(ctxRoot)},
-        CTX_FRAMEWORK_ROOT: ${JSON.stringify(projectRoot)},
-        CTX_PROJECT_ROOT: ${JSON.stringify(projectRoot)},
+        CTX_INSTANCE_ID: instanceId,
+        CTX_ROOT: ctxRoot,
+        CTX_FRAMEWORK_ROOT: frameworkRoot,
+        CTX_PROJECT_ROOT: process.env.CTX_PROJECT_ROOT || frameworkRoot,
         CTX_ORG: process.env.CTX_ORG || ${JSON.stringify(detectedOrg)},
       },
       max_restarts: 50,

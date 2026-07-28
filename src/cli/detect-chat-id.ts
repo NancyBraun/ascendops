@@ -291,7 +291,8 @@ async function detectChatId(opts: DetectOptions): Promise<void> {
     }
 
     const chatId = String(user.chatId);
-    const allowedUser = user.username || String(user.fromId);
+    // The daemon accepts numeric Telegram user IDs, never @usernames.
+    const allowedUser = String(user.fromId);
     const displayName = user.firstName || user.username || `id ${user.fromId}`;
 
     if (opts.json) {

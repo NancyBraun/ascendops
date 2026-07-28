@@ -32,6 +32,9 @@ GUARD_ABS="$PWD/$GUARD"
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 DH="david""hunter"
 CT="cortex""tos"
+ORG="ascend""ops"
+AGENT="da""ne"
+USERS_ROOT="/""Users"
 fails=0
 
 # expect_fail LABEL MARKER FILE... — guard must exit non-zero AND report MARKER.
@@ -54,31 +57,31 @@ cat > "$TMP/planted.md" <<EOF
 # Phase Multi-Agent Report
 | Agents simulated | 5 (boris, paul, sentinel, donna, nick) |
 | paul | 6 | heartbeat(4h), morning-review(0 13 * * *), evening-review(0 1 * * *) |
-Checked at /Users/$DH/cortextos/orgs/lifeos/agents/boris/AGENTS.md
+Checked at $USERS_ROOT/$DH/cortextos/orgs/lifeos/agents/boris/AGENTS.md
 EOF
 expect_fail "planted leak (operator path)" 'operator home path' "$TMP/planted.md"
 expect_fail "planted leak (roster table)" 'roster' "$TMP/planted.md"
 
 # (c1) operator path in a framework file (simulating src/) MUST FAIL.
 cat > "$TMP/src_planted.ts" <<EOF
-// config reference: /Users/$DH/cortextos/src/daemon/index.ts
+// config reference: $USERS_ROOT/$DH/cortextos/src/daemon/index.ts
 EOF
 expect_fail "operator path in framework file" 'operator home path' "$TMP/src_planted.ts"
 
 # (e) BARE operator home path — EOL and quote-delimited — MUST FAIL.
 cat > "$TMP/bare_eol.md" <<EOF
-workdir is /Users/$DH
+workdir is $USERS_ROOT/$DH
 EOF
 expect_fail "bare operator path at EOL" 'operator home path' "$TMP/bare_eol.md"
 cat > "$TMP/bare_quote.md" <<EOF
-HOME="/Users/$DH" make build
+HOME="$USERS_ROOT/$DH" make build
 EOF
 expect_fail "bare operator path before quote" 'operator home path' "$TMP/bare_quote.md"
 
 # (i) second operator identity MUST FAIL outside the exact-line allowlist;
 # the repo's real fixture files PASS only via that allowlist.
 cat > "$TMP/ct_planted.md" <<EOF
-log at /Users/$CT/.$CT/default/logs/outbound-messages.jsonl
+log at $USERS_ROOT/$CT/.$CT/default/logs/outbound-messages.jsonl
 EOF
 expect_fail "second operator identity" 'operator home path' "$TMP/ct_planted.md"
 expect_pass "sprint7 fixture file (exact-line allowlist)" tests/sprint7-environment.test.ts
@@ -97,7 +100,7 @@ expect_fail "capitalized roster+cron table" 'roster' "$TMP/docs_fleet_uc.md"
 # (g) tests/leak-guard-exfil.md is NOT self-skipped — MUST FAIL.
 mkdir -p "$TMP/tests"
 cat > "$TMP/tests/leak-guard-exfil.md" <<EOF
-exfil: /Users/$DH/cortextos/your org internal docs
+exfil: $USERS_ROOT/$DH/cortextos/orgs/$ORG/agents
 EOF
 pushd "$TMP" > /dev/null
 out=$(bash "$GUARD_ABS" "tests/leak-guard-exfil.md" 2>&1) \
@@ -107,24 +110,24 @@ printf '%s\n' "$out" | grep -q 'operator home path' \
 popd > /dev/null
 
 # (h) PUBLIC orgs carve-outs are scanned; private orgs runtime stays exempt.
-mkdir -p "$TMP/your org internal docs" "$TMP/your org internal docs"
-cat > "$TMP/your org internal docs" <<EOF
-memory archive: /Users/$DH/Documents/AscendOps-Brain/01-Memory/daily/
+mkdir -p "$TMP/orgs/$ORG/docs/durable" "$TMP/orgs/$ORG/agents/$AGENT"
+cat > "$TMP/orgs/$ORG/knowledge.md" <<EOF
+memory archive: $USERS_ROOT/$DH/Documents/AscendOps-Brain/01-Memory/daily/
 EOF
-cat > "$TMP/your org internal docs" <<EOF
-worktree: /Users/$DH/cortextos-worktrees/example
+cat > "$TMP/orgs/$ORG/docs/durable/planted-spec.md" <<EOF
+worktree: $USERS_ROOT/$DH/cortextos-worktrees/example
 EOF
-cat > "$TMP/your org internal docs" <<EOF
-/Users/$DH/cortextos/your org internal docs
+cat > "$TMP/orgs/$ORG/agents/$AGENT/agent_state.md" <<EOF
+$USERS_ROOT/$DH/cortextos/orgs/$ORG/agents/$AGENT/MEMORY.md
 EOF
 pushd "$TMP" > /dev/null
-out=$(bash "$GUARD_ABS" "your org internal docs" 2>&1) \
+out=$(bash "$GUARD_ABS" "orgs/$ORG/knowledge.md" 2>&1) \
   && { echo "FAIL: scanner PASSED a leak in orgs knowledge.md (public carve-out)"; fails=1; }
 printf '%s\n' "$out" | grep -q 'operator home path' \
   || { echo "FAIL: operator home path not detected in orgs knowledge.md"; fails=1; }
-out=$(bash "$GUARD_ABS" "your org internal docs" 2>&1) \
+out=$(bash "$GUARD_ABS" "orgs/$ORG/docs/durable/planted-spec.md" 2>&1) \
   && { echo "FAIL: scanner PASSED a leak in orgs docs/durable (public carve-out)"; fails=1; }
-out=$(bash "$GUARD_ABS" "your org internal docs" 2>&1) \
+out=$(bash "$GUARD_ABS" "orgs/$ORG/agents/$AGENT/agent_state.md" 2>&1) \
   && { echo "FAIL: guard PASSED a tracked private-runtime path (must report it — tracked private paths ship publicly)"; fails=1; }
 printf '%s\n' "$out" | grep -q 'private runtime path is tracked' \
   || { echo "FAIL: tracked private-runtime path not flagged with the expected marker"; fails=1; }
@@ -134,7 +137,7 @@ popd > /dev/null
 mkdir -p "$TMP/spacerepo"
 pushd "$TMP/spacerepo" > /dev/null
 git init -q .
-printf 'ref /Users/%s/x\n' "$DH" > "leak file.md"
+printf 'ref %s/%s/x\n' "$USERS_ROOT" "$DH" > "leak file.md"
 git add -A
 git -c user.email=leak@test -c user.name=leak commit -qm plant > /dev/null
 out=$(bash "$GUARD_ABS" --tree HEAD 2>&1) \

@@ -42,16 +42,23 @@ gws gmail +send --to "vendor@example.com" --cc "you@example.com" --subject "Subj
 3. **Sending:** Only after David approves via Telegram. Always CC you@example.com on vendor comms.
 4. **Night mode:** Read only. Queue drafts for morning review. No sending.
 
-## Mark message as processed
+## Configure processed-message deduplication
 
-After acting on a Gmail watch message, apply the `blue-processed` label (ID: `Label_72`) instead of marking read. IMAP clients re-mark read messages unread within seconds; the label persists correctly.
+Gmail watch persistence is controlled by the agent's `config.json`, not environment variables. During onboarding, create or select a processed label, look up its Gmail API label ID, and configure both the label ID and the query exclusion:
 
-```bash
-# Mark a message as processed (required after every Gmail watch action)
-gws gmail users messages modify --params '{"userId":"me","id":"<MESSAGE_ID>"}' --json '{"addLabelIds":["Label_72"]}' --format json
+```json
+{
+  "gmail_watch": {
+    "query": "is:unread -label:<processed-label-name>",
+    "interval_ms": 900000,
+    "processed_label_id": "<processed-label-id>"
+  }
+}
 ```
 
-Gmail watch query filters on `-label:blue-processed` so labeled messages won't re-appear.
+`gmail_watch.processed_label_id` is the label ID the daemon applies after it writes the inbox event. The `-label:<processed-label-name>` term uses the label's Gmail query name and keeps already-labeled messages out of later searches. Configure both values and do not guess either one. Without `processed_label_id`, deduplication is only in memory and a message can be delivered again after a restart.
+
+Manual `gws gmail users messages modify` calls can apply labels during cleanup, but they are not the daemon's restart-redelivery control. The authoritative control is `config.json` `gmail_watch`.
 
 ## Useful searches
 

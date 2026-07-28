@@ -47,7 +47,7 @@ describe('active-threads', () => {
       subject: 'No Hot Water In Home',
       owner: 'blue',
       status: 'waiting_on_vendor',
-      lastAction: 'Sent schedule message to Stubblefield',
+      lastAction: 'Sent schedule message to Example Plumbing',
       nextTriggerAt: '2026-05-09T14:00:00Z',
       notes: 'Tenant says mornings are worst.',
     });
@@ -121,7 +121,7 @@ describe('active-threads', () => {
       subject: 'No Hot Water In Home',
       owner: 'blue',
       status: 'waiting_on_vendor',
-      lastAction: 'Sent schedule message to Stubblefield',
+      lastAction: 'Sent schedule message to Example Plumbing',
     });
 
     addActiveThread(paths, {
@@ -145,7 +145,7 @@ describe('active-threads', () => {
       subject: 'No Hot Water In Home',
       owner: 'blue',
       status: 'waiting_on_vendor',
-      lastAction: 'Sent schedule message to Stubblefield',
+      lastAction: 'Sent schedule message to Example Plumbing',
     });
 
     const removed = clearActiveThreads(paths);

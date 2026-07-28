@@ -94,7 +94,7 @@ The captured session is stored at `~/.claude/credentials/appfolio-session.json` 
 ```bash
 af probe
 ```
-Note in `SYSTEM.md`: "PM platform: AppFolio (af CLI configured — captured session)." Full command surface, the dry-run write posture, and the recapture runbook: `.claude/skills/appfolio/SKILL.md`.
+Note in `SYSTEM.md`: "PM platform: AppFolio (af CLI configured — captured session)." Use `af --help` and `af <command> --help` for the installed command surface and dry-run posture. For session recapture, follow this Step 3a and the capture instructions shipped with the platform operator's reviewed `cli-anything-appfolio` source. This public agent bundle does not include a separate local AppFolio skill.
 
 ### 3b. Other platforms
 Collect the API key / credentials → `.env` keyed by platform; note the platform in `SYSTEM.md`. If the platform has no API, fall back to CSV import + `[HUMAN]` tasks (see Troubleshooting).

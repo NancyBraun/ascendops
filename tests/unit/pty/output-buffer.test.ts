@@ -134,6 +134,32 @@ describe('OutputBuffer redaction', () => {
     expect(buf.getSize()).toBe(`output ends with a partial token ${partial}`.length);
   });
 
+  it('safe cursor returns only newly committed redacted output', () => {
+    const buf = new OutputBuffer(1000, '/tmp/fake-stdout.log');
+    buf.push('old prompt\n');
+    const cursor = buf.createSafeCursor();
+
+    buf.push(`token=${FAKE_JWT}\n`);
+    const fresh = buf.getSafeTailSince(cursor);
+
+    expect(fresh).toBe('token=[REDACTED_JWT]\n');
+    expect(fresh).not.toContain('old prompt');
+    expect(fresh).not.toContain(FAKE_JWT);
+  });
+
+  it('safe cursor never exposes a JWT split across push boundaries', () => {
+    const buf = new OutputBuffer(1000, '/tmp/fake-stdout.log');
+    const cursor = buf.createSafeCursor();
+
+    buf.push(`token=${FAKE_JWT.slice(0, 40)}`);
+    expect(buf.getSafeTailSince(cursor)).not.toContain(FAKE_JWT.slice(0, 40));
+
+    buf.push(`${FAKE_JWT.slice(40)}\n`);
+    const fresh = buf.getSafeTailSince(cursor);
+    expect(fresh).toBe('token=[REDACTED_JWT]\n');
+    expect(fresh).not.toContain(FAKE_JWT);
+  });
+
   it('partial-token holdback flushes unredacted when it turns out NOT to be a JWT', () => {
     const buf = new OutputBuffer(1000, '/tmp/fake-stdout.log');
     // Looks like a JWT prefix at the boundary, but the next chunk reveals

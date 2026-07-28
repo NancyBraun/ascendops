@@ -4,18 +4,23 @@
 // Note: env vars use process.env.X || 'default' so PM2 picks up the value
 // from the calling shell at startup time. This means `CTX_INSTANCE_ID=foo
 // pm2 restart cortextos-daemon` switches instances without regenerating.
+const path = require('path');
+const frameworkRoot = process.env.CTX_FRAMEWORK_ROOT || __dirname;
+const instanceId = process.env.CTX_INSTANCE_ID || 'default';
+const ctxRoot = process.env.CTX_ROOT || path.join(process.env.HOME || frameworkRoot, '.cortextos', instanceId);
+
 module.exports = {
   apps: [
     {
       name: 'cortextos-daemon',
-      script: "C:\\Users\\JasonLinch\\ascendops\\dist\\daemon.js",
+      script: path.join(frameworkRoot, 'dist', 'daemon.js'),
       args: '--instance ' + (process.env.CTX_INSTANCE_ID || "cortextos2"),
-      cwd: "C:/Users/JasonLinch/ascendops",
+      cwd: frameworkRoot,
       env: {
         CTX_INSTANCE_ID: process.env.CTX_INSTANCE_ID || "cortextos2",
-        CTX_ROOT: process.env.CTX_ROOT || "C:\\Users\\JasonLinch\\.cortextos\\cortextos2",
-        CTX_FRAMEWORK_ROOT: "C:/Users/JasonLinch/ascendops",
-        CTX_PROJECT_ROOT: "C:/Users/JasonLinch/ascendops",
+        CTX_ROOT: ctxRoot,
+        CTX_FRAMEWORK_ROOT: frameworkRoot,
+        CTX_PROJECT_ROOT: process.env.CTX_PROJECT_ROOT || frameworkRoot,
         CTX_ORG: process.env.CTX_ORG || "carolinas-pm",
       },
       max_restarts: 50,
@@ -24,9 +29,9 @@ module.exports = {
     },
     {
       name: 'cortextos-dashboard',
-      script: "C:\\Users\\JasonLinch\\ascendops\\dashboard\\node_modules\\next\\dist\\bin\\next",
-      args: "dev",
-      cwd: "C:\\Users\\JasonLinch\\ascendops\\dashboard",
+      script: 'npm',
+      args: 'run dev',
+      cwd: path.join(frameworkRoot, 'dashboard'),
       env: {
         PORT: process.env.PORT || '3000',
       },

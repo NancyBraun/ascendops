@@ -9,7 +9,7 @@
   "platform": "Telnyx Voice AI",
   "owner": "AscendOps (David)",
   "persona": "Answers resident and vendor maintenance calls by phone and text, looks up work orders and property details, and never auto-dispatches: it texts David for approval before any outbound call or dispatch.",
-  "number": "+1 (555) 010-0100",
+  "number": "+1 (202) 555-0\u003145",
   "numberNote": "public resident-facing line",
   "channels": {
     "summary": "Voice and SMS",

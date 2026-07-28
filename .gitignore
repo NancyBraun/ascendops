@@ -25,6 +25,7 @@ orgs/
 secrets.env
 templates/*/.env
 .cortextos-env
+.claude-consent.json
 
 # Agent runtime data
 orgs/*/agents/*/memory/
@@ -34,6 +35,9 @@ agents/*/memory/
 
 # macOS metadata
 .DS_Store
+
+# Per-checkout marker for the deployed live tree
+.cortextos-live-tree
 
 # Test artifacts
 test-results/

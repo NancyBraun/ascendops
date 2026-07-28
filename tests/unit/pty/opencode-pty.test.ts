@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { join } from 'path';
 
+const preflightMocks = vi.hoisted(() => ({
+  ensureFolderTrusted: vi.fn(() => true),
+  ensureBypassPromptSuppressed: vi.fn(() => true),
+  readUnattendedConsent: vi.fn(() => undefined),
+}));
+
+vi.mock('../../../src/utils/claude-preflight.js', () => preflightMocks);
+
 const fsMocks = {
   existsSync: vi.fn().mockReturnValue(false),
   mkdirSync: vi.fn(),
@@ -40,6 +48,7 @@ vi.mock('node-pty', () => ({
   }),
 }));
 
+const { AgentPTY } = await import('../../../src/pty/agent-pty.js');
 const { OpencodePTY, opencodeSessionExists } = await import('../../../src/pty/opencode-pty.js');
 
 const mockEnv = {
@@ -64,6 +73,8 @@ beforeEach(() => {
   fsMocks.unlinkSync.mockReset();
   fsMocks.readFileSync.mockReset();
   fsMocks.readdirSync.mockReset().mockReturnValue([]);
+  preflightMocks.ensureFolderTrusted.mockClear();
+  preflightMocks.ensureBypassPromptSuppressed.mockClear();
 });
 
 describe('OpencodePTY', () => {
@@ -102,6 +113,58 @@ describe('OpencodePTY', () => {
 
     expect(args).toEqual(['--continue']);
   });
+
+  it.each(['fresh', 'continue'] as const)(
+    'does not run Claude preflight or prompt timers for an OpenCode %s spawn',
+    async (mode) => {
+      vi.useFakeTimers();
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const pty = new OpencodePTY(mockEnv, {});
+        installSpawnMock(pty);
+        await pty.spawn(mode, '');
+
+        pty.getOutputBuffer().push(
+          'Claude Code is running in Bypass Permissions mode.\n  2. Yes, I accept\n',
+        );
+        await vi.advanceTimersByTimeAsync(32_000);
+
+        expect(preflightMocks.ensureFolderTrusted).not.toHaveBeenCalled();
+        expect(preflightMocks.ensureBypassPromptSuppressed).not.toHaveBeenCalled();
+        expect(warn).not.toHaveBeenCalled();
+        expect(mockPty.write).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it.each(['openai', 'google'] as const)(
+    'does not run Claude preflight or prompt timers for base AgentPTY vendor %s',
+    async (vendor) => {
+      vi.useFakeTimers();
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const pty = new AgentPTY(mockEnv, { vendor });
+        (pty as unknown as { spawnFn: typeof mockSpawn }).spawnFn = mockSpawn;
+        await pty.spawn('fresh', '');
+
+        pty.getOutputBuffer().push(
+          'Claude Code is running in Bypass Permissions mode.\n  2. Yes, I accept\n',
+        );
+        await vi.advanceTimersByTimeAsync(32_000);
+
+        expect(preflightMocks.ensureFolderTrusted).not.toHaveBeenCalled();
+        expect(preflightMocks.ensureBypassPromptSuppressed).not.toHaveBeenCalled();
+        expect(warn).not.toHaveBeenCalled();
+        expect(mockPty.write).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it('starts the persistent TUI without a launch-time prompt', async () => {
     const pty = new OpencodePTY(mockEnv, {

@@ -143,7 +143,8 @@ Agent secrets: `orgs/{org}/agents/{agent}/.env`
 ### af (AppFolio CLI)
 - Binary: `af` — plain-HTTP AppFolio reads (occupancies, leases, applications, units, properties, tenants, reports) plus two dry-run-default leasing writes (send-application, group)
 - Health check: `af probe`
-- Full command surface, dry-run posture, and the session-recapture runbook: `.claude/skills/appfolio/SKILL.md`
+- Command surface and dry-run posture: `af --help` and `af <command> --help`
+- Session recapture: follow `ONBOARDING.md` Step 3a and the capture instructions shipped with the platform operator's reviewed `cli-anything-appfolio` source
 
 ### Playwright (Browser Automation)
 - `playwright` Python binary, Chromium installed (headless)

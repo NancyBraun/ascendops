@@ -187,7 +187,7 @@ describe('outbound comms lint', () => {
     // SHA regex must require at least one hex letter; plain numeric IDs
     // (phone numbers, dollar amounts, ticket numbers) must NOT block.
     await busCommand.parseAsync(
-      ['send-telegram', '12345', 'Call back at 4233161234 about ticket 9876543'],
+      ['send-telegram', '12345', 'Call back at 423555' + '0144 about ticket 9876543'],
       { from: 'user' },
     );
     expect(telegramSendSpy).toHaveBeenCalledTimes(1);

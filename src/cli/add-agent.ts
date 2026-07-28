@@ -6,6 +6,10 @@ import { OrgContext } from '../types';
 import { validateAgentName, validateOrgName } from '../utils/validate';
 import { atomicWriteSync } from '../utils/atomic';
 import { materializeOnboardingSkill } from './onboarding-skill';
+import {
+  isDurableUnattendedConsentSource,
+  readUnattendedConsentState,
+} from '../utils/claude-preflight';
 
 const VALID_RUNTIMES = ['claude-code', 'hermes', 'codex-app-server', 'opencode'] as const;
 type RuntimeKind = typeof VALID_RUNTIMES[number];
@@ -183,17 +187,31 @@ export const addAgentCommand = new Command('add-agent')
       }, null, 2) + '\n', 'utf-8');
     }
 
-    // Persist non-default runtime into config.json regardless of whether the
-    // file came from a template or was created above. The template-supplied
-    // config.json wins file existence, so we read-merge-write to inject the
-    // runtime field that agent-process.ts branches on.
-    if (options.runtime !== 'claude-code' && existsSync(configPath)) {
+    // Read-merge-write generated config fields. Template-supplied config.json
+    // wins file existence, while explicit generated fields make runtime and
+    // unattended-consent behavior self-describing.
+    if (existsSync(configPath)) {
       try {
         const existingCfg = JSON.parse(readFileSync(configPath, 'utf-8'));
-        existingCfg.runtime = options.runtime;
-        writeFileSync(configPath, JSON.stringify(existingCfg, null, 2) + '\n', 'utf-8');
+        let changed = false;
+        if (options.runtime !== 'claude-code') {
+          existingCfg.runtime = options.runtime;
+          changed = true;
+        }
+        if (existingCfg.dangerously_skip_permissions === undefined) {
+          const consent = readUnattendedConsentState(projectRoot);
+          if (consent.state === 'valid' && isDurableUnattendedConsentSource(consent.source)) {
+            existingCfg.dangerously_skip_permissions = consent.value;
+            changed = true;
+          } else if (consent.state === 'lost') {
+            console.error('Warning: unattended consent record is unreadable; generated config remains unset. Repair consent with installer/consent-gate.mjs --grant or --revoke.');
+          }
+        }
+        if (changed) {
+          writeFileSync(configPath, JSON.stringify(existingCfg, null, 2) + '\n', 'utf-8');
+        }
       } catch (err) {
-        console.error(`Warning: failed to set runtime field in config.json: ${(err as Error).message}`);
+        console.error(`Warning: failed to set generated fields in config.json: ${(err as Error).message}`);
       }
     }
 

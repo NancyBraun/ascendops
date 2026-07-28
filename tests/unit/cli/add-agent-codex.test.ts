@@ -224,6 +224,43 @@ describe('PR-02: add-agent --runtime codex-app-server', () => {
     expect(cfg.runtime).toBe('claude-code');
   });
 
+  it.each([false, true])('stamps genuine unattended consent %s into a generated config', async (consent) => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    writeFileSync(
+      join(tempRoot, '.claude-consent.json'),
+      JSON.stringify({ unattended_bypass: consent, decided_at: new Date().toISOString(), source: 'interactive-installer' }),
+    );
+
+    const name = consent ? 'claude-consented' : 'claude-declined';
+    await addAgentCommand.parseAsync([
+      'node', 'cli', name,
+      '--org', 'testorg', '--instance', 'pr02-test',
+    ]);
+
+    const cfg = JSON.parse(readFileSync(join(tempRoot, 'orgs', 'testorg', 'agents', name, 'config.json'), 'utf-8'));
+    expect(cfg.dangerously_skip_permissions).toBe(consent);
+  });
+
+  it.each([
+    ['absent', undefined],
+    ['defaulted', JSON.stringify({ unattended_bypass: false, decided_at: new Date().toISOString(), source: 'non-interactive-default' })],
+    ['corrupt', '{broken'],
+  ])('does not persist %s consent as an explicit generated field', async (_label, record) => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    if (record !== undefined) writeFileSync(join(tempRoot, '.claude-consent.json'), record);
+
+    const name = `claude-${_label}`;
+    await addAgentCommand.parseAsync([
+      'node', 'cli', name,
+      '--org', 'testorg', '--instance', 'pr02-test',
+    ]);
+
+    const cfg = JSON.parse(readFileSync(join(tempRoot, 'orgs', 'testorg', 'agents', name, 'config.json'), 'utf-8'));
+    expect(cfg).not.toHaveProperty('dangerously_skip_permissions');
+  });
+
   it('scaffolds opencode from the standard agent bootstrap without codex artifacts', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});

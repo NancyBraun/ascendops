@@ -1,6 +1,7 @@
 import { appendFileSync, existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'fs';
 import { join, sep } from 'path';
 import { homedir } from 'os';
+import { execFileSync } from 'child_process';
 import type { AgentConfig, AgentStatus, CtxEnv } from '../types/index.js';
 import { AgentPTY } from '../pty/agent-pty.js';
 import { CodexAppServerPTY } from '../pty/codex-app-server-pty.js';
@@ -18,9 +19,13 @@ import {
   markHealthy,
   shouldRollback,
   performRollback,
+  isWatchdogRollbackEnabled,
+  watchdogRollbackFloorRef,
+  watchdogRollbackMaxResets,
   readRecoveryNote,
   deleteRecoveryNote,
   MIN_HEALTHY_SECONDS,
+  type RollbackPreflightContext,
 } from './watchdog.js';
 type LogFn = (msg: string) => void;
 type StartOptions = { partOfFleetStart?: boolean };
@@ -46,6 +51,9 @@ export class AgentProcess {
   private sessionStart: Date | null = null;
   private status: AgentStatus['status'] = 'stopped';
   private stopping: boolean = false;
+  private startPromise: Promise<void> | null = null;
+  private stopPromise: Promise<void> | null = null;
+  private sessionRefreshPromise: Promise<void> | null = null;
   // BUG-040 fix: persists across stop() return until handleExit clears it.
   // Required because BUG-032's CRLF + 5s wait can cause graceful shutdown to
   // exceed the 5s Promise.race timeout in stop(), which would otherwise reset
@@ -87,6 +95,10 @@ export class AgentProcess {
   // a handoff doc marker. start() reads this after spawn to decide whether the
   // daemon should fire runtime-owned lifecycle Telegram directly.
   private lastSpawnWasHandoff = false;
+  // Wall-clock signal for the most recent successful daemon-owned
+  // injection. FastChecker compares this with the Stop hook's idle timestamp
+  // to distinguish an open turn from an idle session.
+  private lastInjectedAt: number = 0;
 
   constructor(name: string, env: CtxEnv, config: AgentConfig, log?: LogFn) {
     this.name = name;
@@ -114,6 +126,18 @@ export class AgentProcess {
    * Start the agent. Spawns Claude Code in a PTY.
    */
   async start(options: StartOptions = {}): Promise<void> {
+    if (this.startPromise) return this.startPromise;
+
+    const operation = this.performStart(options);
+    this.startPromise = operation;
+    try {
+      await operation;
+    } finally {
+      if (this.startPromise === operation) this.startPromise = null;
+    }
+  }
+
+  private async performStart(options: StartOptions): Promise<void> {
     if (this.status === 'running') {
       this.log('Already running');
       return;
@@ -194,7 +218,7 @@ export class AgentProcess {
         return;
       }
       this.log(`Exited with code ${exitCode} signal ${signal}`);
-      this.handleExit(exitCode);
+      void this.handleExit(exitCode);
       // Signal anyone awaiting this PTY's exit (e.g. stop() — BUG-011 fix)
       this.resolveExit?.();
       this.resolveExit = null;
@@ -248,7 +272,18 @@ export class AgentProcess {
    * Stop the agent gracefully.
    */
   async stop(): Promise<void> {
-    if (this.stopping) return;
+    if (this.stopPromise) return this.stopPromise;
+
+    const operation = this.performStop();
+    this.stopPromise = operation;
+    try {
+      await operation;
+    } finally {
+      if (this.stopPromise === operation) this.stopPromise = null;
+    }
+  }
+
+  private async performStop(): Promise<void> {
     this.stopping = true;
     // BUG-040 fix: stopRequested persists ACROSS stop()'s return until
     // handleExit clears it. This is the safety net for the case where the
@@ -386,6 +421,18 @@ export class AgentProcess {
    * conversation directory still has .jsonl files (shouldContinue() is true).
    */
   async sessionRefresh(): Promise<void> {
+    if (this.sessionRefreshPromise) return this.sessionRefreshPromise;
+
+    const operation = this.performSessionRefresh();
+    this.sessionRefreshPromise = operation;
+    try {
+      await operation;
+    } finally {
+      if (this.sessionRefreshPromise === operation) this.sessionRefreshPromise = null;
+    }
+  }
+
+  private async performSessionRefresh(): Promise<void> {
     if (this.status === 'halted' || this.status === 'stopped') {
       this.log(`Refusing session refresh in status=${this.status}`);
       return;
@@ -408,9 +455,42 @@ export class AgentProcess {
     } catch (err) {
       this.log(`Failed to write .session-refresh marker: ${err}`);
     }
-    await this.stop();
-    await this.start();
-    this.log('Session refreshed');
+    const retryBackoffsMs = [1_000, 5_000];
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= retryBackoffsMs.length + 1; attempt++) {
+      try {
+        await this.stop();
+        await this.start();
+        if (!this.pty || this.status !== 'running') {
+          throw new Error(`start returned without a running PTY (status=${this.status})`);
+        }
+        this.log(attempt === 1 ? 'Session refreshed' : `Session refreshed on retry ${attempt}`);
+        return;
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        const backoffMs = retryBackoffsMs[attempt - 1] ?? 0;
+        this.appendSessionRefreshToRestartsLog('SESSION_REFRESH_RETRY', attempt, backoffMs, lastError);
+        if (attempt <= retryBackoffsMs.length) {
+          this.log(`Session refresh attempt ${attempt} failed: ${lastError.message}; retrying in ${backoffMs / 1000}s`);
+          await sleep(backoffMs);
+        }
+      }
+    }
+
+    const reason = `session refresh failed after 3 attempts: ${lastError?.message ?? 'unknown error'}`;
+    this.appendSessionRefreshToRestartsLog('SESSION_REFRESH_ESCALATION', 3, 0, lastError);
+    this.log(`Escalating failed session refresh to a fresh hard restart: ${reason}`);
+    try {
+      await this.hardRestartSelf(reason);
+    } catch (err) {
+      const escalationError = err instanceof Error ? err : new Error(String(err));
+      this.appendSessionRefreshToRestartsLog('SESSION_REFRESH_ESCALATION_FAILED', 3, 0, escalationError);
+      // Enter the normal crash-recovery path so a failed fresh restart still
+      // gets another scheduled start instead of leaving the agent permanently dead.
+      this.handleExit(1);
+      throw escalationError;
+    }
   }
 
   /**
@@ -438,7 +518,12 @@ export class AgentProcess {
       // inherit AgentPTY. Feed it through the same write path used historically.
       injectMessageIntoPty((data) => this.pty?.write(data), content);
     }
+    this.lastInjectedAt = Date.now();
     return { ok: true };
+  }
+
+  getLastInjectedAt(): number {
+    return this.lastInjectedAt;
   }
 
   /**
@@ -530,6 +615,62 @@ export class AgentProcess {
     }
   }
 
+  private logWatchdogRollbackEvent(context: RollbackPreflightContext): void {
+    const meta = JSON.stringify({
+      agent: this.name,
+      branch: context.branch,
+      failed_commit: context.failedCommit,
+      target: context.target,
+      reset_count: context.resetCount,
+      max_resets: context.maxResets,
+      repo_root: context.repoRoot,
+    });
+    try {
+      execFileSync(
+        'cortextos',
+        ['bus', 'log-event', 'error', 'watchdog_rollback_preflight', 'error', '--meta', meta],
+        {
+          cwd: this.env.agentDir || process.cwd(),
+          env: {
+            ...process.env,
+            CTX_AGENT_NAME: this.name,
+            CTX_AGENT_DIR: this.env.agentDir,
+            CTX_ORG: this.env.org,
+            CTX_ROOT: this.env.ctxRoot,
+            CTX_PROJECT_ROOT: this.env.projectRoot,
+            CTX_FRAMEWORK_ROOT: this.env.frameworkRoot,
+            CORTEXTOS_DIR: this.env.frameworkRoot || process.env.CORTEXTOS_DIR,
+          },
+          stdio: 'pipe',
+        },
+      );
+    } catch (err) {
+      this.log(`Watchdog: failed to log rollback preflight event — ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  private async notifyWatchdogRollback(context: RollbackPreflightContext): Promise<void> {
+    const telegramApi = this.telegramApi;
+    const telegramChatId = this.telegramChatId;
+    if (!telegramApi || !telegramChatId) {
+      this.log('Watchdog: no Telegram handle wired for rollback pre-notify');
+      return;
+    }
+    const text = [
+      `WATCHDOG ROLLBACK ABOUT TO RUN`,
+      `Agent: ${this.name}`,
+      `Branch: ${context.branch}`,
+      `Failed commit: ${context.failedCommit.slice(0, 12)}`,
+      `Rollback target: ${context.target.slice(0, 12)}`,
+      `Depth: ${context.resetCount + 1}/${context.maxResets}`,
+    ].join('\n');
+    try {
+      await telegramApi.sendMessage(telegramChatId, text);
+    } catch (err) {
+      this.log(`Watchdog: rollback pre-notify failed — ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   /**
    * Write raw data to the agent's PTY.
    * Used for TUI navigation (key sequences).
@@ -617,7 +758,7 @@ export class AgentProcess {
     }
   }
 
-  private handleExit(exitCode: number): void {
+  private async handleExit(exitCode: number): Promise<void> {
     // Capture the output buffer BEFORE nulling this.pty — needed for rate-limit
     // detection below (hasRateLimitSignature reads from the buffer).
     const outputBuffer = this.pty?.getOutputBuffer();
@@ -790,12 +931,21 @@ export class AgentProcess {
     recordFailure(stateDir, this.repoRoot);
 
     if (this.repoRoot && shouldRollback(stateDir, this.repoRoot)) {
-      this.log(`Watchdog: commit unstable after ${this.crashCount} crashes — performing git rollback`);
-      const result = performRollback(stateDir, this.repoRoot);
-      if (result.success) {
-        this.log(`Watchdog: rolled back to ${result.rolledBackTo.slice(0, 12)}${result.stashRef ? `, stash: ${result.stashRef}` : ''}`);
+      if (!isWatchdogRollbackEnabled()) {
+        this.log('Watchdog: rollback threshold reached, but WATCHDOG_ROLLBACK_ENABLED is not true — diagnostics recorded, destructive rollback skipped');
       } else {
-        this.log(`Watchdog: rollback failed — ${result.reason}`);
+        this.log(`Watchdog: commit unstable after ${this.crashCount} crashes — performing git rollback`);
+        const result = await performRollback(stateDir, this.repoRoot, {
+          maxResetsPerBranch: watchdogRollbackMaxResets(),
+          floorRef: watchdogRollbackFloorRef(),
+          logEventBeforeRollback: (context) => this.logWatchdogRollbackEvent(context),
+          notifyBeforeRollback: (context) => this.notifyWatchdogRollback(context),
+        });
+        if (result.success) {
+          this.log(`Watchdog: rolled back to ${result.rolledBackTo.slice(0, 12)}${result.stashRef ? `, stash: ${result.stashRef}` : ''}`);
+        } else {
+          this.log(`Watchdog: rollback failed — ${result.reason}`);
+        }
       }
     }
 
@@ -894,7 +1044,7 @@ export class AgentProcess {
     if (!launchDir) return false;
 
     // Claude projects dir uses the absolute path with all separators replaced by dashes
-    // e.g. /Users/foo/agents/boss -> -Users-foo-agents-boss (leading sep becomes -)
+    // e.g. /home/example/agents/boss -> -home-example-agents-boss (leading sep becomes -)
     // Use homedir() for cross-platform compatibility (HOME is not set on Windows).
     const convDir = join(
       homedir(),
@@ -1354,6 +1504,27 @@ export class AgentProcess {
       appendFileSync(join(logDir, 'restarts.log'), logLine, 'utf-8');
     } catch {
       /* swallow — never break crash recovery on a logging failure */
+    }
+  }
+
+  private appendSessionRefreshToRestartsLog(
+    kind: 'SESSION_REFRESH_RETRY' | 'SESSION_REFRESH_ESCALATION' | 'SESSION_REFRESH_ESCALATION_FAILED',
+    attempt: number,
+    backoffMs: number,
+    error: Error | null,
+  ): void {
+    try {
+      const logDir = join(this.env.ctxRoot, 'logs', this.name);
+      ensureDir(logDir);
+      const timestamp = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+      const message = (error?.message ?? 'unknown error').replace(/[\r\n"]/g, ' ');
+      appendFileSync(
+        join(logDir, 'restarts.log'),
+        `[${timestamp}] ${kind}: attempt=${attempt} backoff_s=${backoffMs / 1000} error="${message}"\n`,
+        'utf-8',
+      );
+    } catch {
+      /* logging must never prevent lifecycle recovery */
     }
   }
 

@@ -11,6 +11,7 @@ import { execSync, spawnSync, spawn } from 'child_process';
 import { existsSync, mkdirSync, writeFileSync, readdirSync, statSync, chmodSync, lstatSync, readlinkSync, symlinkSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { homedir, platform } from 'os';
+import { pathToFileURL } from 'url';
 
 const REPO_URL = process.env.ASCENDOPS_REPO || process.env.CORTEXTOS_REPO || 'https://github.com/noogalabs/ascendops.git';
 const INSTALL_DIR = process.env.ASCENDOPS_DIR || process.env.CORTEXTOS_DIR || join(homedir(), 'ascendops');
@@ -503,7 +504,7 @@ if (existsSync(INSTALL_DIR)) {
         runVisible('git pull --ff-only', { cwd: INSTALL_DIR });
       }
     } catch {
-      warn('Could not pull — continuing with existing version');
+      warn('Could not pull — existing version may be stale; required installer files will be verified before continuing');
     }
   } else {
     fail(`${INSTALL_DIR} exists but is not a git repo. Remove it or set CORTEXTOS_DIR to a different path.`);
@@ -591,6 +592,11 @@ if (existsSync(INSTALL_DIR)) {
       warn('Could not configure upstream remote — run manually: git remote rename origin upstream');
     }
   }
+}
+
+const consentGatePath = join(INSTALL_DIR, 'installer', 'consent-gate.mjs');
+if (!existsSync(consentGatePath)) {
+  fail(`Required installer file is missing: ${consentGatePath}\n    Restore the checkout or remove ${INSTALL_DIR} and rerun the installer.`);
 }
 
 // ─── 8. npm install ───────────────────────────────────────────────────────────
@@ -716,7 +722,12 @@ console.log('');
 console.log('This opens Claude Code with the /onboarding wizard already running.');
 console.log('');
 
-if (commandExists('claude') && process.stdin.isTTY && process.stdout.isTTY) {
+console.log('Claude Code warns that Bypass Permissions mode can execute potentially DANGEROUS commands.');
+console.log('AscendOps agents can run --dangerously-skip-permissions unattended.');
+
+const spawnOnboarding = () => {
+  if (!commandExists('claude') || !process.stdin.isTTY || !process.stdout.isTTY) return;
+
   console.log('Launching Claude Code and starting /onboarding...');
   console.log('');
 
@@ -732,4 +743,50 @@ if (commandExists('claude') && process.stdin.isTTY && process.stdout.isTTY) {
   claudeProc.on('exit', (code) => {
     process.exit(code ?? 0);
   });
+};
+
+let consentGate;
+try {
+  consentGate = await import(pathToFileURL(consentGatePath).href);
+} catch (error) {
+  console.error(`${RED}  ✗${R} FAILED to load the unattended-consent gate: ${error instanceof Error ? error.message : String(error)}`);
+  console.error('    Installation stopped before onboarding. Restore the installer files and rerun install.mjs.');
+  process.exit(1);
+}
+
+
+const grantCommand = `node ${JSON.stringify(consentGatePath)} --grant`;
+const consentChoice = await consentGate.resolveInstallerConsent({
+  envValue: process.env.ASCENDOPS_UNATTENDED,
+  stdinIsTTY: process.stdin.isTTY,
+  stdoutIsTTY: process.stdout.isTTY,
+  platform: process.platform,
+  grantCommand,
+  reportDefault: (message) => warn(message),
+});
+const enableUnattendedMode = consentChoice.answerYes;
+console.log('');
+
+const consentResult = await consentGate.runConsentGate({
+  answerYes: enableUnattendedMode,
+  installDir: INSTALL_DIR,
+  source: consentChoice.source,
+  importPreflight: () => import(pathToFileURL(join(INSTALL_DIR, 'dist', 'claude-preflight.js')).href),
+  spawnOnboarding,
+  exit: (code) => process.exit(code),
+  reportFailure: (message) => {
+    console.error(`${RED}  ✗${R} ${message}`);
+    console.error('    Installation stopped before onboarding. Fix consent-file access, then rerun install.mjs.');
+  },
+});
+
+if (consentResult !== false) {
+  const outcome = consentGate.installerConsentOutcome({
+    answerYes: enableUnattendedMode,
+    source: consentChoice.source,
+    result: consentResult,
+    installDir: INSTALL_DIR,
+  });
+  if (outcome.level === 'warn') warn(outcome.message);
+  else ok(outcome.message);
 }

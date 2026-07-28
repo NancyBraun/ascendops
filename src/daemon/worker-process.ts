@@ -1,8 +1,10 @@
 import { join } from 'path';
 import { mkdirSync } from 'fs';
-import type { CtxEnv, WorkerStatus, WorkerStatusValue } from '../types/index.js';
+import type { AgentConfig, CtxEnv, WorkerStatus, WorkerStatusValue } from '../types/index.js';
 import { AgentPTY } from '../pty/agent-pty.js';
 import { injectMessage } from '../pty/inject.js';
+
+type AgentPtyFactory = (env: CtxEnv, config: AgentConfig, logPath: string) => AgentPTY;
 
 /**
  * WorkerProcess — ephemeral Claude Code session for parallelized tasks.
@@ -43,7 +45,13 @@ export class WorkerProcess {
   /**
    * Spawn the worker Claude Code session with the given task prompt.
    */
-  async spawn(env: CtxEnv, prompt: string, config: { model?: string } = {}): Promise<void> {
+  async spawn(
+    env: CtxEnv,
+    prompt: string,
+    config: { model?: string } = {},
+    ptyFactory: AgentPtyFactory = (ptyEnv, ptyConfig, logPath) =>
+      new AgentPTY(ptyEnv, ptyConfig, logPath),
+  ): Promise<void> {
     // Ensure bus dirs exist so the worker can use cortextos bus commands
     try {
       mkdirSync(join(env.ctxRoot, 'inbox', this.name), { recursive: true });
@@ -52,7 +60,7 @@ export class WorkerProcess {
     } catch { /* ignore */ }
 
     const logPath = join(env.ctxRoot, 'logs', this.name, 'stdout.log');
-    this.pty = new AgentPTY(env, config, logPath);
+    this.pty = ptyFactory(env, config, logPath);
 
     this.pty.onExit((code) => {
       this.exitCode = code;

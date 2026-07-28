@@ -22,7 +22,7 @@ describe('sendViaRelay', () => {
   it('fails fast when RELAY_URL is missing', async () => {
     delete process.env.RELAY_URL;
     process.env.RELAY_INTERNAL_TOKEN = 'tok';
-    const r = await sendViaRelay({ to: '+15551234567', text: 'x' });
+    const r = await sendViaRelay({ to: '+12025550143', text: 'x' });
     expect(r.ok).toBe(false);
     expect(r.error).toContain('RELAY_URL');
   });
@@ -30,7 +30,7 @@ describe('sendViaRelay', () => {
   it('fails fast when RELAY_INTERNAL_TOKEN is missing', async () => {
     process.env.RELAY_URL = 'http://localhost:4242';
     delete process.env.RELAY_INTERNAL_TOKEN;
-    const r = await sendViaRelay({ to: '+15551234567', text: 'x' });
+    const r = await sendViaRelay({ to: '+12025550143', text: 'x' });
     expect(r.ok).toBe(false);
     expect(r.error).toContain('RELAY_INTERNAL_TOKEN');
   });
@@ -41,7 +41,7 @@ describe('sendViaRelay', () => {
     const r1 = await sendViaRelay({ to: '', text: 'x' });
     expect(r1.ok).toBe(false);
     expect(r1.error).toBe('missing to or text');
-    const r2 = await sendViaRelay({ to: '+15551234567', text: '' });
+    const r2 = await sendViaRelay({ to: '+12025550143', text: '' });
     expect(r2.ok).toBe(false);
     expect(r2.error).toBe('missing to or text');
   });
@@ -57,16 +57,16 @@ describe('sendViaRelay', () => {
       return {
         ok: true,
         status: 202,
-        json: async () => ({ queued: true, to: '+15551234567' }),
+        json: async () => ({ queued: true, to: '+12025550143' }),
       } as unknown as Response;
     });
-    const r = await sendViaRelay({ to: '+15551234567', text: 'hello world' });
+    const r = await sendViaRelay({ to: '+12025550143', text: 'hello world' });
     expect(r.ok).toBe(true);
     expect(r.status).toBe(202);
     expect(String(capturedUrl)).toBe('http://localhost:4242/outbound');
     expect((capturedInit?.headers as any)['X-Relay-Token']).toBe('super-secret-token');
     const body = JSON.parse(capturedInit?.body as string);
-    expect(body.to).toBe('+15551234567');
+    expect(body.to).toBe('+12025550143');
     expect(body.text).toBe('hello world');
     expect(body.photo_url).toBeUndefined();
   });
@@ -79,7 +79,7 @@ describe('sendViaRelay', () => {
       capturedInit = init as any;
       return { ok: true, status: 202, json: async () => ({}) } as unknown as Response;
     });
-    await sendViaRelay({ to: '+15551234567', text: 'your SSN is 123-45-6789, thanks' });
+    await sendViaRelay({ to: '+12025550143', text: 'your SSN is 123-45-6789, thanks' });
     const body = JSON.parse(capturedInit?.body as string);
     expect(body.text).toBe('your SSN is [REDACTED-SSN], thanks');
     expect(body.text).not.toContain('123-45-6789');
@@ -94,7 +94,7 @@ describe('sendViaRelay', () => {
       return { ok: true, status: 202, json: async () => ({}) } as unknown as Response;
     });
     await sendViaRelay({
-      to: '+15551234567',
+      to: '+12025550143',
       text: 'see attached',
       photoUrl: 'https://media.example.com/abc.jpg',
     });
@@ -124,7 +124,7 @@ describe('sendViaRelay', () => {
       status: 401,
       json: async () => ({ error: 'invalid or missing X-Relay-Token header' }),
     }) as unknown as Response);
-    const r = await sendViaRelay({ to: '+15551234567', text: 'x' });
+    const r = await sendViaRelay({ to: '+12025550143', text: 'x' });
     expect(r.ok).toBe(false);
     expect(r.status).toBe(401);
     expect((r.body as any).error).toContain('X-Relay-Token');
@@ -134,7 +134,7 @@ describe('sendViaRelay', () => {
     process.env.RELAY_URL = 'http://localhost:4242';
     process.env.RELAY_INTERNAL_TOKEN = 'tok';
     globalThis.fetch = vi.fn(async () => { throw new Error('timeout'); });
-    const r = await sendViaRelay({ to: '+15551234567', text: 'x' });
+    const r = await sendViaRelay({ to: '+12025550143', text: 'x' });
     expect(r.ok).toBe(false);
     expect(r.error).toBe('timeout');
   });

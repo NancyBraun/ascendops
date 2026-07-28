@@ -1555,6 +1555,340 @@ describe('CodexAppServerPTY thread/tokenUsage/updated → codex-tokens.jsonl', (
     );
   });
 
+  describe('active model-gate operator alert', () => {
+    type AlertablePty = {
+      reconcileModelGateAlert(): void;
+      _modelGateAlertPath: string;
+    };
+
+    function alertable(pty: InstanceType<typeof CodexAppServerPTY>): AlertablePty {
+      return pty as unknown as AlertablePty;
+    }
+
+    function bindTelegram(pty: InstanceType<typeof CodexAppServerPTY>, sendMessage = vi.fn().mockResolvedValue(undefined)) {
+      pty.setTelegramHandle(
+        { sendMessage } as unknown as Parameters<typeof pty.setTelegramHandle>[0],
+        '7940429114',
+      );
+      return sendMessage;
+    }
+
+    it('alerts once for a gated model and persists matching dedupe state after send succeeds', async () => {
+      const pty = new CodexAppServerPTY(mockEnv, { model: 'gpt-5.3-codex' });
+      const gatedEvent = logEventMock.mock.calls.find((call) => call[4] === 'codex_model_gated_to_safe_default');
+      const safeModels = (gatedEvent?.[6] as { safe_models: string[] }).safe_models;
+      const sendMessage = bindTelegram(pty);
+
+      alertable(pty).reconcileModelGateAlert();
+      await Promise.resolve();
+
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+      const [, text, , options] = sendMessage.mock.calls[0] as [string, string, undefined, { parseMode: null }];
+      expect(options).toEqual({ parseMode: null });
+      expect(text).toContain("requests model 'gpt-5.3-codex'");
+      expect(text).toContain("actually running 'gpt-5.5'");
+      expect(text).toContain(`[${safeModels.join(', ')}]`);
+      expect(text).toContain('add it to SAFE_MODELS');
+      expect(text).toContain('fix "model" in the agent\'s config.json');
+
+      expect(atomicWriteSyncMock).toHaveBeenCalledTimes(1);
+      const [statePath, rawState] = atomicWriteSyncMock.mock.calls[0] as [string, string];
+      expect(statePath).toBe('/tmp/ctx/state/codex-app-agent/codex-model-gate-alert.json');
+      expect(JSON.parse(rawState)).toEqual({
+        configured_model: 'gpt-5.3-codex',
+        used_model: 'gpt-5.5',
+        alerted_at: expect.any(String),
+      });
+      expect(logEventMock).toHaveBeenCalledWith(
+        expect.anything(),
+        'codex-app-agent',
+        'acme',
+        'action',
+        'codex_model_gate_alert_sent',
+        'warning',
+        expect.objectContaining({
+          configured_model: 'gpt-5.3-codex',
+          used_model: 'gpt-5.5',
+          safe_models: safeModels,
+        }),
+      );
+    });
+
+    it('does not re-alert when persisted state matches the gated model', () => {
+      const pty = new CodexAppServerPTY(mockEnv, { model: 'gpt-5.3-codex' });
+      const sendMessage = bindTelegram(pty);
+      fsMocks.existsSync.mockReturnValue(true);
+      fsMocks.readFileSync.mockReturnValue(JSON.stringify({
+        configured_model: 'gpt-5.3-codex',
+        used_model: 'gpt-5.5',
+        alerted_at: '2026-07-19T00:00:00.000Z',
+      }));
+
+      alertable(pty).reconcileModelGateAlert();
+
+      expect(sendMessage).not.toHaveBeenCalled();
+      expect(atomicWriteSyncMock).not.toHaveBeenCalled();
+    });
+
+    it('alerts again when persisted state belongs to a different configured model', async () => {
+      const pty = new CodexAppServerPTY(mockEnv, { model: 'gpt-5.3-codex' });
+      const sendMessage = bindTelegram(pty);
+      fsMocks.existsSync.mockReturnValue(true);
+      fsMocks.readFileSync.mockReturnValue(JSON.stringify({
+        configured_model: 'gpt-5.2-codex',
+        used_model: 'gpt-5.5',
+        alerted_at: '2026-07-19T00:00:00.000Z',
+      }));
+
+      alertable(pty).reconcileModelGateAlert();
+      await Promise.resolve();
+
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+      expect(atomicWriteSyncMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('does nothing for a safe or unset model when no alert state exists', () => {
+      for (const model of ['gpt-5-codex', undefined]) {
+        const pty = new CodexAppServerPTY(mockEnv, { model });
+        const sendMessage = bindTelegram(pty);
+        alertable(pty).reconcileModelGateAlert();
+        expect(sendMessage).not.toHaveBeenCalled();
+      }
+      expect(atomicWriteSyncMock).not.toHaveBeenCalled();
+      expect(fsMocks.unlinkSync).not.toHaveBeenCalled();
+    });
+
+    it('clears stale alert state and notifies when the configured model is now safe', async () => {
+      const pty = new CodexAppServerPTY(mockEnv, { model: 'gpt-5-codex' });
+      const sendMessage = bindTelegram(pty);
+      fsMocks.existsSync.mockReturnValue(true);
+      fsMocks.readFileSync.mockReturnValue(JSON.stringify({
+        configured_model: 'gpt-5.3-codex',
+        used_model: 'gpt-5.5',
+        alerted_at: '2026-07-19T00:00:00.000Z',
+      }));
+
+      alertable(pty).reconcileModelGateAlert();
+      await Promise.resolve();
+
+      expect(fsMocks.unlinkSync).toHaveBeenCalledWith('/tmp/ctx/state/codex-app-agent/codex-model-gate-alert.json');
+      expect(sendMessage).toHaveBeenCalledWith(
+        '7940429114',
+        'MODEL GATE CLEARED: agent codex-app-agent is now running its configured model gpt-5-codex.',
+        undefined,
+        { parseMode: null },
+      );
+      expect(logEventMock).toHaveBeenCalledWith(
+        expect.anything(),
+        'codex-app-agent',
+        'acme',
+        'action',
+        'codex_model_gate_cleared',
+        'info',
+        expect.anything(),
+      );
+    });
+
+    it('writes a cleared tombstone without reporting success when stale-state unlink fails', () => {
+      const pty = new CodexAppServerPTY(mockEnv, { model: 'gpt-5-codex' });
+      const sendMessage = bindTelegram(pty);
+      fsMocks.existsSync.mockReturnValue(true);
+      fsMocks.readFileSync.mockReturnValue(JSON.stringify({
+        configured_model: 'gpt-5.3-codex',
+        used_model: 'gpt-5.5',
+        alerted_at: '2026-07-19T00:00:00.000Z',
+      }));
+      fsMocks.unlinkSync.mockImplementation(() => {
+        throw new Error('unlink denied');
+      });
+
+      alertable(pty).reconcileModelGateAlert();
+
+      expect(atomicWriteSyncMock).toHaveBeenCalledTimes(1);
+      const [statePath, rawState] = atomicWriteSyncMock.mock.calls[0] as [string, string];
+      expect(statePath).toBe('/tmp/ctx/state/codex-app-agent/codex-model-gate-alert.json');
+      expect(JSON.parse(rawState)).toEqual(expect.objectContaining({
+        status: 'cleared',
+        configured_model: 'gpt-5.3-codex',
+        used_model: 'gpt-5.5',
+      }));
+      expect(sendMessage).not.toHaveBeenCalled();
+      expect(logEventMock).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        'action',
+        'codex_model_gate_cleared',
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+
+    it('alerts on the next same-model gated lifecycle when persisted state is a cleared tombstone', async () => {
+      const pty = new CodexAppServerPTY(mockEnv, { model: 'gpt-5.3-codex' });
+      const sendMessage = bindTelegram(pty);
+      fsMocks.existsSync.mockReturnValue(true);
+      fsMocks.readFileSync.mockReturnValue(JSON.stringify({
+        status: 'cleared',
+        configured_model: 'gpt-5.3-codex',
+        used_model: 'gpt-5.5',
+        alerted_at: '2026-07-19T00:00:00.000Z',
+        cleared_at: '2026-07-19T01:00:00.000Z',
+      }));
+
+      alertable(pty).reconcileModelGateAlert();
+      await Promise.resolve();
+
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+      expect(atomicWriteSyncMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('requires manual state removal when unlink and cleared-tombstone writes both fail', () => {
+      const pty = new CodexAppServerPTY(mockEnv, { model: 'gpt-5-codex' });
+      fsMocks.existsSync.mockReturnValue(true);
+      fsMocks.readFileSync.mockReturnValue(JSON.stringify({
+        configured_model: 'gpt-5.3-codex',
+        used_model: 'gpt-5.5',
+        alerted_at: '2026-07-19T00:00:00.000Z',
+      }));
+      fsMocks.unlinkSync.mockImplementation(() => {
+        throw new Error('unlink denied');
+      });
+      atomicWriteSyncMock.mockImplementation(() => {
+        throw new Error('write denied');
+      });
+
+      alertable(pty).reconcileModelGateAlert();
+
+      const output = pty.getOutputBuffer().getRecent();
+      expect(output).toContain('/tmp/ctx/state/codex-app-agent/codex-model-gate-alert.json');
+      expect(output).toContain('remove it manually');
+      expect(logEventMock).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        'action',
+        'codex_model_gate_cleared',
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+
+    it('defers without writing state when Telegram is not bound', () => {
+      const pty = new CodexAppServerPTY(mockEnv, { model: 'gpt-5.3-codex' });
+
+      alertable(pty).reconcileModelGateAlert();
+
+      expect(atomicWriteSyncMock).not.toHaveBeenCalled();
+      expect(pty.getOutputBuffer().getRecent()).toContain('model gate alert deferred: no Telegram handle');
+    });
+
+    it('does not write state when Telegram delivery rejects', async () => {
+      const pty = new CodexAppServerPTY(mockEnv, { model: 'gpt-5.3-codex' });
+      bindTelegram(pty, vi.fn().mockRejectedValue(new Error('telegram down')));
+
+      alertable(pty).reconcileModelGateAlert();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(atomicWriteSyncMock).not.toHaveBeenCalled();
+      expect(pty.getOutputBuffer().getRecent()).toContain('model gate alert send failed');
+    });
+
+    it('reconciles after the bootstrap line and before the initial turn is queued', async () => {
+      const pty = new CodexAppServerPTY(mockEnv, { model: 'gpt-5.3-codex' });
+      vi.spyOn(pty as never, 'startAppServerWithRetry' as never).mockResolvedValue(undefined as never);
+      vi.spyOn(pty as never, 'connectRpc' as never).mockResolvedValue(undefined as never);
+      vi.spyOn(pty as never, 'initializeRpc' as never).mockResolvedValue(undefined as never);
+      vi.spyOn(pty as never, 'startOrResumeThread' as never).mockImplementation(async () => {
+        (pty as unknown as { _threadId: string })._threadId = 'thread-alert';
+      });
+      const queueTurn = vi.spyOn(pty as never, 'queueTurn' as never).mockImplementation(() => {});
+      const reconcile = vi.fn().mockImplementation(() => {
+        expect(pty.getOutputBuffer().getRecent()).toContain('[codex-app-server] ready thread=thread-alert');
+        expect(queueTurn).not.toHaveBeenCalled();
+      });
+      (pty as unknown as { reconcileModelGateAlert(): void }).reconcileModelGateAlert = reconcile;
+
+      await pty.spawn('fresh', 'hello');
+
+      expect(reconcile).toHaveBeenCalledTimes(1);
+      expect(queueTurn).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps a live post-start Telegram bind store-only', () => {
+      const pty = new CodexAppServerPTY(mockEnv, { model: 'gpt-5.3-codex' });
+      (pty as unknown as { _alive: boolean })._alive = true;
+      const reconcile = vi.spyOn(alertable(pty), 'reconcileModelGateAlert');
+      const sendMessage = bindTelegram(pty);
+
+      expect(reconcile).not.toHaveBeenCalled();
+      expect(sendMessage).not.toHaveBeenCalled();
+      expect(atomicWriteSyncMock).not.toHaveBeenCalled();
+    });
+
+    it('does not alert or persist state when Telegram binds during pending bootstrap', async () => {
+      const pty = new CodexAppServerPTY(mockEnv, { model: 'gpt-5.3-codex' });
+      let resolveStart!: () => void;
+      const startPending = new Promise<void>((resolve) => {
+        resolveStart = resolve;
+      });
+      vi.spyOn(pty as never, 'startAppServerWithRetry' as never).mockReturnValue(startPending as never);
+      vi.spyOn(pty as never, 'connectRpc' as never).mockResolvedValue(undefined as never);
+      vi.spyOn(pty as never, 'initializeRpc' as never).mockResolvedValue(undefined as never);
+      vi.spyOn(pty as never, 'startOrResumeThread' as never).mockImplementation(async () => {
+        (pty as unknown as { _threadId: string })._threadId = 'thread-pending';
+      });
+      const reconcile = vi.spyOn(alertable(pty), 'reconcileModelGateAlert');
+
+      const spawning = pty.spawn('fresh', '');
+      await Promise.resolve();
+      const sendMessage = bindTelegram(pty);
+
+      expect(reconcile).not.toHaveBeenCalled();
+      expect(sendMessage).not.toHaveBeenCalled();
+      expect(atomicWriteSyncMock).not.toHaveBeenCalled();
+
+      resolveStart();
+      await spawning;
+    });
+
+    it('writes no state for failed bootstrap and alerts once on the next successful lifecycle', async () => {
+      const failedPty = new CodexAppServerPTY(mockEnv, { model: 'gpt-5.3-codex' });
+      bindTelegram(failedPty);
+      vi.spyOn(failedPty as never, 'startAppServerWithRetry' as never).mockRejectedValue(new Error('bootstrap failed') as never);
+      const failedReconcile = vi.spyOn(alertable(failedPty), 'reconcileModelGateAlert');
+
+      await expect(failedPty.spawn('fresh', '')).rejects.toThrow('bootstrap failed');
+      expect(failedReconcile).not.toHaveBeenCalled();
+      expect(atomicWriteSyncMock).not.toHaveBeenCalled();
+
+      const successfulPty = new CodexAppServerPTY(mockEnv, { model: 'gpt-5.3-codex' });
+      const sendMessage = bindTelegram(successfulPty);
+      vi.spyOn(successfulPty as never, 'startAppServerWithRetry' as never).mockResolvedValue(undefined as never);
+      vi.spyOn(successfulPty as never, 'connectRpc' as never).mockResolvedValue(undefined as never);
+      vi.spyOn(successfulPty as never, 'initializeRpc' as never).mockResolvedValue(undefined as never);
+      vi.spyOn(successfulPty as never, 'startOrResumeThread' as never).mockImplementation(async () => {
+        (successfulPty as unknown as { _threadId: string })._threadId = 'thread-success';
+      });
+
+      await successfulPty.spawn('fresh', '');
+      await Promise.resolve();
+
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+      expect(atomicWriteSyncMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not reconcile when a Telegram handle is bound before spawn', () => {
+      const pty = new CodexAppServerPTY(mockEnv, { model: 'gpt-5.3-codex' });
+      const reconcile = vi.spyOn(alertable(pty), 'reconcileModelGateAlert');
+
+      bindTelegram(pty);
+
+      expect(reconcile).not.toHaveBeenCalled();
+    });
+  });
+
   it('skips append when turnId is missing', () => {
     const pty = new CodexAppServerPTY(mockEnv, {});
     (pty as unknown as { _threadId: string })._threadId = 'thread-9';

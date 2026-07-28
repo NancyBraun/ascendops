@@ -5,6 +5,7 @@ export default defineConfig({
     cli: 'src/cli/index.ts',
     ascendops: 'src/cli/ascendops.ts',
     daemon: 'src/daemon/index.ts',
+    'claude-preflight': 'src/utils/claude-preflight.ts',
     'hooks/hook-permission-telegram': 'src/hooks/hook-permission-telegram.ts',
     'hooks/hook-ask-telegram': 'src/hooks/hook-ask-telegram.ts',
     'hooks/hook-planmode-telegram': 'src/hooks/hook-planmode-telegram.ts',

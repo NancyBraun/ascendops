@@ -49,6 +49,8 @@ export interface CommitStability {
   last_healthy: string;
   /** ISO timestamp of the last rollback (informational). */
   last_rollback_at?: string;
+  /** Maps branch name → cumulative destructive rollback count. */
+  rollback_counts?: Record<string, number>;
 }
 
 export interface RollbackResult {
@@ -56,6 +58,43 @@ export interface RollbackResult {
   rolledBackTo: string;
   stashRef: string | null;
   reason: string;
+}
+
+export interface RollbackPreflightContext {
+  repoRoot: string;
+  stateDir: string;
+  branch: string;
+  failedCommit: string;
+  target: string;
+  resetCount: number;
+  maxResets: number;
+}
+
+type RollbackPreflightHook = (context: RollbackPreflightContext) => void | Promise<void>;
+
+export interface RollbackOptions {
+  /** Maximum cumulative destructive resets allowed on one branch. Defaults to 1. */
+  maxResetsPerBranch?: number;
+  /** Optional floor ref. Rollback target must not be older than this ref. */
+  floorRef?: string;
+  /** Called after preflight passes and before the first destructive git op. */
+  logEventBeforeRollback?: RollbackPreflightHook;
+  /** Called after preflight passes and before the first destructive git op. */
+  notifyBeforeRollback?: RollbackPreflightHook;
+}
+
+export function isWatchdogRollbackEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.WATCHDOG_ROLLBACK_ENABLED?.trim().toLowerCase() === 'true';
+}
+
+export function watchdogRollbackMaxResets(env: NodeJS.ProcessEnv = process.env): number {
+  const parsed = Number.parseInt(env.WATCHDOG_ROLLBACK_MAX_RESETS ?? '', 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
+}
+
+export function watchdogRollbackFloorRef(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const ref = env.WATCHDOG_ROLLBACK_FLOOR_REF?.trim();
+  return ref || undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -73,7 +112,7 @@ function recoveryNotePath(stateDir: string): string {
 export function loadStability(stateDir: string): CommitStability {
   const path = stabilityPath(stateDir);
   if (!existsSync(path)) {
-    return { restart_counts: {}, last_healthy: '' };
+    return { restart_counts: {}, last_healthy: '', rollback_counts: {} };
   }
   try {
     const raw = readFileSync(path, 'utf-8');
@@ -84,9 +123,12 @@ export function loadStability(stateDir: string): CommitStability {
         : {},
       last_healthy: typeof parsed.last_healthy === 'string' ? parsed.last_healthy : '',
       last_rollback_at: parsed.last_rollback_at,
+      rollback_counts: parsed.rollback_counts && typeof parsed.rollback_counts === 'object'
+        ? parsed.rollback_counts as Record<string, number>
+        : {},
     };
   } catch {
-    return { restart_counts: {}, last_healthy: '' };
+    return { restart_counts: {}, last_healthy: '', rollback_counts: {} };
   }
 }
 
@@ -138,6 +180,24 @@ export function getCurrentCommit(repoRoot: string): string | null {
   } catch {
     return null;
   }
+}
+
+function getCurrentBranch(repoRoot: string): string {
+  try {
+    const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd: repoRoot,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    return branch || 'HEAD';
+  } catch {
+    return 'unknown';
+  }
+}
+
+function parsePositiveInt(value: number | undefined, fallback: number): number {
+  if (value !== undefined && Number.isInteger(value) && value > 0) return value;
+  return fallback;
 }
 
 // ---------------------------------------------------------------------------
@@ -233,6 +293,20 @@ function targetIsValid(repoRoot: string, target: string): boolean {
   }
 }
 
+function targetRespectsFloor(repoRoot: string, target: string, floorRef: string): boolean {
+  if (!floorRef) return true;
+  if (!targetIsValid(repoRoot, floorRef)) return false;
+  try {
+    execFileSync('git', ['merge-base', '--is-ancestor', floorRef, target], {
+      cwd: repoRoot,
+      stdio: 'pipe',
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Perform a git rollback:
  *   1. Determine + VALIDATE rollback target (last_healthy commit, or origin/main).
@@ -253,16 +327,21 @@ function targetIsValid(repoRoot: string, target: string): boolean {
  *   - Refuse to roll back to HEAD itself — a no-op that would still run the
  *     destructive stash+reset cycle for no benefit.
  */
-export function performRollback(
+export async function performRollback(
   stateDir: string,
   repoRoot: string,
-): RollbackResult {
+  options: RollbackOptions = {},
+): Promise<RollbackResult> {
   const failedCommit = getCurrentCommit(repoRoot) ?? 'unknown';
   const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const branch = getCurrentBranch(repoRoot);
+  const maxResets = parsePositiveInt(options.maxResetsPerBranch, 1);
 
   // Step 1: determine + validate rollback target FIRST (pre-flight)
   const stability = loadStability(stateDir);
   let target = stability.last_healthy;
+  const rollbackCounts = stability.rollback_counts ?? {};
+  const resetCount = rollbackCounts[branch] ?? 0;
 
   if (!target) {
     // No healthy commit on record — fetch and use origin/main
@@ -305,6 +384,44 @@ export function performRollback(
       stashRef: null,
       reason: `Rollback target equals current HEAD (${failedCommit.slice(0, 12)}) — refusing no-op destructive cycle`,
     };
+  }
+
+  if (resetCount >= maxResets) {
+    return {
+      success: false,
+      rolledBackTo: target,
+      stashRef: null,
+      reason: `Rollback depth cap reached for branch ${branch}: ${resetCount}/${maxResets} resets already recorded`,
+    };
+  }
+
+  if (options.floorRef && !targetRespectsFloor(repoRoot, target, options.floorRef)) {
+    return {
+      success: false,
+      rolledBackTo: target,
+      stashRef: null,
+      reason: `Rollback target ${target.slice(0, 12)} is older than or unrelated to floor ref ${options.floorRef} — refusing destructive ops`,
+    };
+  }
+
+  const preflightContext: RollbackPreflightContext = {
+    repoRoot,
+    stateDir,
+    branch,
+    failedCommit,
+    target,
+    resetCount,
+    maxResets,
+  };
+  try {
+    await options.logEventBeforeRollback?.(preflightContext);
+  } catch {
+    // Best-effort audit hook — never let logging change daemon recovery flow.
+  }
+  try {
+    await options.notifyBeforeRollback?.(preflightContext);
+  } catch {
+    // Best-effort operator notification — rollback safety preflight already passed.
   }
 
   // Step 2: stash tracked modifications only (NO -u flag — watchdog must
@@ -385,6 +502,10 @@ export function performRollback(
   // Update stability: clear failed commit's count, record rollback time
   stability.last_rollback_at = new Date().toISOString();
   delete stability.restart_counts[failedCommit];
+  stability.rollback_counts = {
+    ...rollbackCounts,
+    [branch]: resetCount + 1,
+  };
   saveStability(stateDir, stability);
 
   return { success: true, rolledBackTo: target, stashRef, reason: '' };

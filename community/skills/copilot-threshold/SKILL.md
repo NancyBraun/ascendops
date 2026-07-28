@@ -99,7 +99,7 @@ For each locked category: if `total_decisions >= 20` AND `accuracy_pct >= 95.0` 
 3. Append autonomy row to Blue's `GUARDRAILS.md`
 4. Append/update row in Blue's `SOUL.md` earned autonomy table
 5. Send message to orchestrator + Telegram to operator
-6. Log: `cortextos bus log-event quality blue_autonomy_unlocked info --meta '{"category":"...","accuracy":...,"decisions":...}'`
+6. Log: `cortextos bus log-event metric blue_autonomy_unlocked info --meta '{"category":"...","accuracy":...,"decisions":...}'`
 
 Telegram format: `"Blue has earned autonomous {category} rights ({accuracy}% over {n} decisions). She will now act without asking and send you a post-action note. Reply DEMOTE {category} to reverse."`
 
@@ -118,7 +118,7 @@ For each unlocked category: collect `autonomous: true` events, trailing 20. If `
 3. Remove autonomy row from Blue's `GUARDRAILS.md` and `SOUL.md`
 4. Notify orchestrator
 5. Send Telegram with the 3 most recent incorrect decisions that caused the drop
-6. Log: `cortextos bus log-event quality blue_autonomy_demoted info --meta '{"category":"...","accuracy":...}'`
+6. Log: `cortextos bus log-event metric blue_autonomy_demoted info --meta '{"category":"...","accuracy":...}'`
 
 Telegram format: `"Blue lost autonomous {category} rights ({accuracy}%). The 3 decisions that caused the drop: — {date}: {description} [x3]. She is back in approval-required mode."`
 
@@ -134,13 +134,13 @@ Include a Blue Copilot Progress table with current status, decision count, and a
 
 **Blue logs before every approval request:**
 ```bash
-cortextos bus log-event quality blue_decision_presented info \
+cortextos bus log-event metric blue_decision_presented info \
   --meta '{"category":"<category>","meld_id":"<id>","recommendation":"<one-line>","subtype":"routine|diagnostic"}'
 ```
 
 **Analyst logs after operator responds:**
 ```bash
-cortextos bus log-event quality blue_decision_outcome info \
+cortextos bus log-event metric blue_decision_outcome info \
   --meta '{"category":"<category>","meld_id":"<id>","outcome":"correct|incorrect|ambiguous","modified":false,"autonomous":false}'
 ```
 

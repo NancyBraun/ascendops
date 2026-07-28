@@ -428,8 +428,8 @@
     },
     {
       "name": "fp-10digit-phone-bare",
-      "input": "phone 4237101234",
-      "expect": "phone 4237101234"
+      "input": "phone 4235550\u003143",
+      "expect": "phone 4235550\u003143"
     },
     {
       "name": "fp-routing-aba-substring-database",

@@ -1,0 +1,61 @@
+name: PR Safety Gates
+
+on:
+  pull_request:
+    branches: [main, master]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: pr-safety-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  leak-guard:
+    name: Leak Guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Prove leak guard blocks poisoned inputs
+        run: |
+          bash tests/leak-guard.test.sh
+          bash tests/leak-guard-adversarial.test.sh
+
+      - name: Scan full pull-request diff
+        run: >-
+          bash .github/scripts/leak-guard.sh --diff
+          "${{ github.event.pull_request.base.sha }}"
+          "${{ github.event.pull_request.head.sha }}"
+
+  scope-reconcile:
+    name: Scope Reconcile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Prove scope reconciliation blocks a mismatch
+        run: bash tests/scope-reconcile.test.sh
+
+      - name: Fetch complete GitHub PR file list
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: >-
+          gh api --paginate --slurp
+          "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files?per_page=100"
+          > "$RUNNER_TEMP/pr-files.json"
+
+      - name: Reconcile API file list with full base...head diff
+        run: >-
+          python3 .github/scripts/scope-reconcile.py
+          --base "${{ github.event.pull_request.base.sha }}"
+          --head "${{ github.event.pull_request.head.sha }}"
+          --github-files-json "$RUNNER_TEMP/pr-files.json"

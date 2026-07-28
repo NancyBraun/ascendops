@@ -59,7 +59,7 @@ TARGET: Every significant piece of work (>10 minutes) = at least 1 task created.
 
 Your integrations are configured during onboarding (see ONBOARDING.md). Typical stack:
 
-- **PM software** (AppFolio / Buildium / Rent Manager / Yardi / custom) — occupancy, lease, and application source of truth. For AppFolio, the `af` CLI is the primary tool for ALL reads (see `.claude/skills/appfolio/SKILL.md` and ONBOARDING Step 3a); its session credential is a captured web-session file, not an `.env` key. Other platforms: credentials in `.env` keyed by platform.
+- **PM software** (AppFolio / Buildium / Rent Manager / Yardi / custom) — occupancy, lease, and application source of truth. For AppFolio, the `af` CLI is the primary tool for ALL reads (see `af --help` and ONBOARDING Step 3a); its session credential is a captured web-session file, not an `.env` key. Other platforms: credentials in `.env` keyed by platform.
 - **Screening service** (TransUnion SmartMove / RentPrep / RentSpree / AppFolio built-in / etc.) — API credentials in `.env` (`SCREENING_API_KEY`, etc.), or web-portal-only with a `[HUMAN]` dispatch task.
 - **SMS** (Twilio or Telnyx) — prospect and resident communications. Credentials in `.env` (`TWILIO_*` or `TELNYX_*`). Optional — Telegram/email-only also works.
 - **Unit roster** — populated at onboarding into `unit-roster.md` and indexed to the shared KB. Query with `ascendops bus kb-query "unit roster" --org $CTX_ORG`.

@@ -9,7 +9,7 @@
  * never-throw contract is preserved.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync, readdirSync, readFileSync, existsSync } from 'fs';
+import { mkdtempSync, rmSync, readdirSync, readFileSync, existsSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
@@ -18,7 +18,10 @@ import {
   recordFailure,
   markHealthy,
   shouldRollback,
+  performRollback,
   getCurrentCommit,
+  isWatchdogRollbackEnabled,
+  watchdogRollbackMaxResets,
   ROLLBACK_THRESHOLD,
   type CommitStability,
 } from '../../../src/daemon/watchdog';
@@ -35,6 +38,34 @@ function initRepo(dir: string): void {
   git('init', '--quiet');
   git('-c', 'user.email=test@test', '-c', 'user.name=test',
       'commit', '--allow-empty', '-m', 'init', '--quiet');
+}
+
+function git(...args: string[]): string {
+  return execFileSync('git', args, {
+    cwd: repoRoot,
+    encoding: 'utf-8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+  }).trim();
+}
+
+function commitEmpty(message: string): string {
+  git('-c', 'user.email=test@test', '-c', 'user.name=test',
+    'commit', '--allow-empty', '-m', message, '--quiet');
+  return getCurrentCommit(repoRoot)!;
+}
+
+function writeStability(data: Partial<CommitStability>): void {
+  atomic.ensureDir(stateDir);
+  writeFileSync(
+    join(stateDir, 'watchdog.json'),
+    JSON.stringify({
+      restart_counts: {},
+      last_healthy: '',
+      rollback_counts: {},
+      ...data,
+    }, null, 2) + '\n',
+    'utf-8',
+  );
 }
 
 beforeEach(() => {
@@ -107,5 +138,124 @@ describe('failure counting + rollback threshold round-trip', () => {
     ) as CommitStability;
     expect(parsed.last_healthy).toBe(getCurrentCommit(repoRoot));
     expect(parsed.restart_counts).toEqual({});
+  });
+});
+
+describe('rollback destructive safety gates', () => {
+  it('keeps rollback disabled by default and parses max reset env defensively', () => {
+    expect(isWatchdogRollbackEnabled({} as NodeJS.ProcessEnv)).toBe(false);
+    expect(isWatchdogRollbackEnabled({ WATCHDOG_ROLLBACK_ENABLED: 'false' } as NodeJS.ProcessEnv)).toBe(false);
+    expect(isWatchdogRollbackEnabled({ WATCHDOG_ROLLBACK_ENABLED: 'true' } as NodeJS.ProcessEnv)).toBe(true);
+
+    expect(watchdogRollbackMaxResets({} as NodeJS.ProcessEnv)).toBe(1);
+    expect(watchdogRollbackMaxResets({ WATCHDOG_ROLLBACK_MAX_RESETS: '3' } as NodeJS.ProcessEnv)).toBe(3);
+    expect(watchdogRollbackMaxResets({ WATCHDOG_ROLLBACK_MAX_RESETS: '0' } as NodeJS.ProcessEnv)).toBe(1);
+  });
+
+  it('depth cap halts before stash/reset after N cumulative resets on the branch', async () => {
+    const rollbackTarget = getCurrentCommit(repoRoot)!;
+    const failedCommit = commitEmpty('unstable');
+    const branch = git('rev-parse', '--abbrev-ref', 'HEAD');
+    writeStability({
+      restart_counts: { [failedCommit]: ROLLBACK_THRESHOLD },
+      last_healthy: rollbackTarget,
+      rollback_counts: { [branch]: 1 },
+    });
+
+    const result = await performRollback(stateDir, repoRoot, { maxResetsPerBranch: 1 });
+
+    expect(result.success).toBe(false);
+    expect(result.reason).toContain('Rollback depth cap reached');
+    expect(getCurrentCommit(repoRoot)).toBe(failedCommit);
+  });
+
+  it('fires event and Telegram pre-notify hooks before a destructive rollback', async () => {
+    const rollbackTarget = getCurrentCommit(repoRoot)!;
+    const failedCommit = commitEmpty('unstable');
+    writeStability({
+      restart_counts: { [failedCommit]: ROLLBACK_THRESHOLD },
+      last_healthy: rollbackTarget,
+      rollback_counts: {},
+    });
+    const eventHook = vi.fn();
+    const notifyHook = vi.fn();
+
+    const result = await performRollback(stateDir, repoRoot, {
+      maxResetsPerBranch: 1,
+      logEventBeforeRollback: eventHook,
+      notifyBeforeRollback: notifyHook,
+    });
+
+    expect(result.success).toBe(true);
+    expect(eventHook).toHaveBeenCalledTimes(1);
+    expect(notifyHook).toHaveBeenCalledTimes(1);
+    expect(eventHook.mock.calls[0][0]).toMatchObject({
+      failedCommit,
+      target: rollbackTarget,
+      resetCount: 0,
+      maxResets: 1,
+    });
+    expect(getCurrentCommit(repoRoot)).toBe(rollbackTarget);
+    const parsed = JSON.parse(
+      readFileSync(join(stateDir, 'watchdog.json'), 'utf-8'),
+    ) as CommitStability;
+    const branch = eventHook.mock.calls[0][0].branch as string;
+    expect(parsed.rollback_counts?.[branch]).toBe(1);
+  });
+
+  it('waits for the Telegram pre-notify promise before running git reset', async () => {
+    const rollbackTarget = getCurrentCommit(repoRoot)!;
+    const failedCommit = commitEmpty('unstable');
+    writeStability({
+      restart_counts: { [failedCommit]: ROLLBACK_THRESHOLD },
+      last_healthy: rollbackTarget,
+      rollback_counts: {},
+    });
+    let releaseNotify!: () => void;
+    let settled = false;
+    const notifyStarted = vi.fn();
+    const notifyHook = vi.fn(() => new Promise<void>((resolve) => {
+      notifyStarted();
+      releaseNotify = resolve;
+    }));
+
+    const rollbackPromise = performRollback(stateDir, repoRoot, {
+      maxResetsPerBranch: 1,
+      notifyBeforeRollback: notifyHook,
+    }).then((result) => {
+      settled = true;
+      return result;
+    });
+
+    await Promise.resolve();
+    expect(notifyStarted).toHaveBeenCalledTimes(1);
+    expect(settled).toBe(false);
+    expect(getCurrentCommit(repoRoot)).toBe(failedCommit);
+
+    releaseNotify();
+    const result = await rollbackPromise;
+
+    expect(result.success).toBe(true);
+    expect(getCurrentCommit(repoRoot)).toBe(rollbackTarget);
+  });
+
+  it('refuses rollback targets older than the configured floor ref before reset', async () => {
+    const tooOldTarget = getCurrentCommit(repoRoot)!;
+    const floorCommit = commitEmpty('floor');
+    const failedCommit = commitEmpty('unstable');
+    writeStability({
+      restart_counts: { [failedCommit]: ROLLBACK_THRESHOLD },
+      last_healthy: tooOldTarget,
+      rollback_counts: {},
+    });
+
+    const result = await performRollback(stateDir, repoRoot, {
+      maxResetsPerBranch: 1,
+      floorRef: floorCommit,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.reason).toContain('floor ref');
+    expect(getCurrentCommit(repoRoot)).toBe(failedCommit);
   });
 });
