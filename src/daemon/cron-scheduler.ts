@@ -169,6 +169,14 @@ function computeNextFireAt(cron: CronDefinition, referenceMs: number): number {
 
 const RETRY_DELAYS_MS = [1_000, 4_000, 16_000];
 
+/**
+ * How long to wait before re-attempting a cron whose dispatch failed after all
+ * in-fire retries (typically "injectAgent returned false" — agent not running).
+ * Spaced widely enough to avoid the historical busy-loop, short enough that the
+ * fire lands soon after the agent session comes back up.
+ */
+const FAILED_FIRE_RETRY_MS = 10 * 60_000;
+
 async function fireWithRetry(
   cron: CronDefinition,
   agentName: string,
@@ -388,12 +396,24 @@ export class CronScheduler {
       // crons.json.last_fire_attempted_at (set pre-onFire to detect crash
       // mid-fire — iter 11), and cron-state.json.last_fire (either may be
       // more current depending on which write path recorded the fire).
-      // Fall back to now.
+      // Fall back to created_at, then now.
       const stateFire = stateLastFireByName.get(def.name);
       const candidates: number[] = [];
       if (def.last_fired_at) candidates.push(new Date(def.last_fired_at).getTime());
       if (def.last_fire_attempted_at) candidates.push(new Date(def.last_fire_attempted_at).getTime());
       if (stateFire) candidates.push(new Date(stateFire).getTime());
+
+      // NEVER-FIRED FALLBACK: use created_at, not now.  Counting a
+      // never-fired interval cron forward from `now` restarts its countdown
+      // on every daemon boot, so any cron whose interval exceeds the daemon's
+      // typical uptime (e.g. a "7d" catalog-browse) never fires at all.
+      // Anchoring to created_at makes it overdue on the next boot instead,
+      // where the normal catch-up policy fires it once and then persists
+      // last_fired_at, putting it on a stable cadence.
+      if (candidates.length === 0 && def.created_at) {
+        const createdMs = new Date(def.created_at).getTime();
+        if (!isNaN(createdMs)) candidates.push(createdMs);
+      }
       const referenceMs = candidates.length > 0 ? Math.max(...candidates) : now;
 
       let nextFireAt = computeNextFireAt(def, referenceMs);
@@ -562,16 +582,34 @@ export class CronScheduler {
           continue; // sc is gone, skip clearing firing flag
         }
       } else {
-        // Dispatch failed (all retries exhausted). Advance nextFireAt anyway so
-        // we don't re-fire the same scheduled slot on every subsequent tick —
-        // that produced a busy-loop when an agent was unreachable. Treat the
-        // failed window as a missed slot and schedule the next normal fire.
+        // Dispatch failed (all retries exhausted). Two recovery paths:
+        //
+        // 1. Clear the persisted last_fire_attempted_at marker. It exists to
+        //    stop a crash mid-fire from double-firing on restart, but after a
+        //    KNOWN failure it makes loadCrons() treat the slot as consumed —
+        //    the failed fire then suppresses restart catch-up and daily jobs
+        //    silently skip a day (observed: morning-review 7/23).
+        // 2. Re-arm a bounded retry instead of jumping straight to the next
+        //    regular slot, so the fire lands shortly after the agent comes
+        //    back online. min() with the regular slot keeps the retry from
+        //    crossing into (and doubling up with) the next scheduled fire;
+        //    the FAILED_FIRE_RETRY_MS spacing avoids the busy-loop that the
+        //    plain slot-advance was originally added to fix.
+        try {
+          updateCron(this.agentName, name, { last_fire_attempted_at: undefined });
+          sc.definition = { ...cron, last_fire_attempted_at: undefined };
+        } catch (err) {
+          this.logger(
+            `[cron-scheduler] WARNING: failed to clear last_fire_attempted_at for "${name}" — ` +
+            `${err instanceof Error ? err.message : String(err)}. Restart catch-up for this slot may be skipped.`
+          );
+        }
         const next = computeNextFireAt(cron, now);
         if (!isNaN(next)) {
-          sc.nextFireAt = next;
+          sc.nextFireAt = Math.min(now + FAILED_FIRE_RETRY_MS, next);
           this.logger(
-            `[cron-scheduler] WARNING: "${name}" dispatch failed — advancing to next slot ${new Date(next).toISOString()} ` +
-            `to avoid busy-loop (no last_fired_at update; failure recorded in execution log)`
+            `[cron-scheduler] WARNING: "${name}" dispatch failed — retrying at ${new Date(sc.nextFireAt).toISOString()} ` +
+            `(no last_fired_at update; failure recorded in execution log)`
           );
         } else {
           this.scheduled.delete(name);

@@ -303,21 +303,60 @@ describe('CronScheduler', () => {
     // Scheduler must NOT crash — the log should contain a give-up message
     expect(retryLogs.some(l => l.includes('giving up'))).toBe(true);
 
-    // updateCron is called exactly once with last_fire_attempted_at (iter 11
-    // pre-fire persist), but NEVER with last_fired_at because all attempts
-    // failed.  This matches the iter 11 invariant: attempted_at is recorded
-    // even on failed dispatches so a crash mid-fire cannot double-fire.
-    expect(mockUpdateCron).toHaveBeenCalledTimes(1);
-    expect(mockUpdateCron).toHaveBeenCalledWith(
+    // updateCron is called twice: once pre-fire with last_fire_attempted_at
+    // (iter 11 crash-mid-fire guard), then again AFTER the known failure to
+    // clear it — a slot that never ran must not suppress restart catch-up.
+    // It is NEVER called with last_fired_at because all attempts failed.
+    expect(mockUpdateCron).toHaveBeenCalledTimes(2);
+    expect(mockUpdateCron).toHaveBeenNthCalledWith(
+      1,
       'test-agent',
       'test-cron',
       expect.objectContaining({ last_fire_attempted_at: expect.any(String) })
+    );
+    expect(mockUpdateCron).toHaveBeenNthCalledWith(
+      2,
+      'test-agent',
+      'test-cron',
+      { last_fire_attempted_at: undefined }
     );
     expect(mockUpdateCron).not.toHaveBeenCalledWith(
       'test-agent',
       'test-cron',
       expect.objectContaining({ last_fired_at: expect.any(String) })
     );
+
+    retryScheduler.stop();
+  });
+
+  it('re-arms a failed dispatch after FAILED_FIRE_RETRY_MS instead of waiting for the next slot', async () => {
+    const failingFire = vi.fn().mockRejectedValue(new Error('injectAgent returned false'));
+
+    // 24h cron, 25h overdue — catch-up fires immediately and fails.
+    mockReadCrons.mockReturnValue([
+      makeCron({
+        schedule:      '24h',
+        last_fired_at: new Date(Date.now() - 25 * 3_600_000).toISOString(),
+      }),
+    ]);
+
+    const retryLogs: string[] = [];
+    const retryScheduler = new CronScheduler({
+      agentName: 'test-agent',
+      onFire: failingFire,
+      logger: (msg) => retryLogs.push(msg),
+    });
+    retryScheduler.start();
+
+    // First fire: 4 attempts (1 initial + 3 retries over 21s), all fail.
+    await vi.advanceTimersByTimeAsync(TICK + 1_000 + 4_000 + 16_000 + 1_000);
+    expect(failingFire).toHaveBeenCalledTimes(4);
+    expect(retryLogs.some(l => l.includes('dispatch failed — retrying at'))).toBe(true);
+
+    // 10 minutes later the scheduler re-fires the missed slot (another 4
+    // attempts) — previously it silently waited a full 24h for the next slot.
+    await vi.advanceTimersByTimeAsync(10 * 60_000 + 1_000 + 4_000 + 16_000 + TICK);
+    expect(failingFire).toHaveBeenCalledTimes(8);
 
     retryScheduler.stop();
   });
