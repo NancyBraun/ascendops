@@ -183,19 +183,19 @@ describe('findNearestGate', () => {
 });
 
 describe('getSopIndex (fixture-backed)', () => {
-  it('returns ready state with the 46-SOP public corpus', async () => {
+  it('returns ready state with the 54-SOP public corpus', async () => {
     const data = await getSopIndex();
     expect(data.state).toBe('ready');
     if (data.state !== 'ready') return;
     expect(data.source).toBe('fixtures');
-    expect(data.rows.length).toBe(46);
+    expect(data.rows.length).toBe(54);
     const slugs = data.rows.map((r) => r.slug);
     expect(slugs).toContain('delinquency-escalation-ladder');
     expect(slugs).not.toContain('demo-gated-resident-notice');
     expect(slugs).not.toContain('demo-branching-approval-chain');
   });
 
-  it('the 46-SOP public corpus has zero gated steps today (honest, not a bug)', async () => {
+  it('the 54-SOP public corpus has zero gated steps today (honest, not a bug)', async () => {
     const data = await getSopIndex();
     if (data.state !== 'ready') throw new Error('expected ready state');
     for (const row of data.rows) {

@@ -6,7 +6,9 @@
 // pm2 restart cortextos-daemon` switches instances without regenerating.
 const path = require('path');
 const frameworkRoot = process.env.CTX_FRAMEWORK_ROOT || __dirname;
-const instanceId = process.env.CTX_INSTANCE_ID || 'default';
+// Default pinned to this deployment's instance so ctxRoot below cannot resolve
+// to ~/.cortextos/default while the daemon runs `--instance cortextos2`.
+const instanceId = process.env.CTX_INSTANCE_ID || 'cortextos2';
 const ctxRoot = process.env.CTX_ROOT || path.join(process.env.HOME || frameworkRoot, '.cortextos', instanceId);
 
 module.exports = {
@@ -14,10 +16,10 @@ module.exports = {
     {
       name: 'cortextos-daemon',
       script: path.join(frameworkRoot, 'dist', 'daemon.js'),
-      args: '--instance ' + (process.env.CTX_INSTANCE_ID || "cortextos2"),
+      args: '--instance ' + instanceId,
       cwd: frameworkRoot,
       env: {
-        CTX_INSTANCE_ID: process.env.CTX_INSTANCE_ID || "cortextos2",
+        CTX_INSTANCE_ID: instanceId,
         CTX_ROOT: ctxRoot,
         CTX_FRAMEWORK_ROOT: frameworkRoot,
         CTX_PROJECT_ROOT: process.env.CTX_PROJECT_ROOT || frameworkRoot,
@@ -30,10 +32,20 @@ module.exports = {
     {
       name: 'cortextos-dashboard',
       script: 'npm',
-      args: 'run dev',
+      // MANUAL CHANGE 2026-07-27: was "run dev". This host has 3.8GB RAM for 9
+      // agents; the Next dev server held ~385MB and left the box at ~120MB free.
+      // A production build (`next start`) serves the same dashboard for a
+      // fraction of that. Re-run `npm run build` in dashboard/ after pulling
+      // dashboard changes, since `next start` serves the prebuilt .next output.
+      // NOTE: `cortextos ecosystem` regenerates this file and hardcodes
+      // "run dev" (src/cli/ecosystem.ts:90) — if that is ever re-run, reapply
+      // this line. Boot-time state comes from PM2's dump.pm2 (pm2 save), not
+      // from this file, so a regeneration alone will not revert the running app.
+      args: 'run start',
       cwd: path.join(frameworkRoot, 'dashboard'),
       env: {
         PORT: process.env.PORT || '3000',
+        NODE_ENV: 'production',
       },
       // Dashboard reads its real config from dashboard/.env.local — populated
       // by /onboarding Phase 7. PM2 just supervises the npm process.
