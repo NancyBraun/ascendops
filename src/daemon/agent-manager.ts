@@ -836,7 +836,8 @@ export class AgentManager {
       const commands = collectTelegramCommands(scanDirs);
       registerTelegramCommands(botToken, commands).then((result) => {
         if (result.status === 'ok') {
-          log(`Telegram commands registered (${result.count} commands)`);
+          const droppedNote = result.dropped ? ` — ${result.dropped} dropped to fit Telegram's payload budget` : '';
+          log(`Telegram commands registered (${result.count} commands${droppedNote})`);
         } else if (result.status !== 'empty') {
           // Surface failures instead of swallowing them silently: a failed
           // registration means the agent's slash menu is missing until the next

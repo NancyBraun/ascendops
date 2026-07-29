@@ -8,6 +8,7 @@ import {
   storeUsageData,
   collectTelegramCommands,
   registerTelegramCommands,
+  fitCommandsToTelegramBudget,
 } from '../src/bus/metrics.js';
 
 describe('Sprint 5: Observability & Metrics', () => {
@@ -453,12 +454,96 @@ describe('Sprint 5: Observability & Metrics', () => {
     });
 
     it('returns error after exhausting all attempts and reports the last error', async () => {
-      const fetchMock = vi.fn().mockResolvedValue({ json: async () => ({ ok: false, description: 'Bad Request' }) });
+      const fetchMock = vi.fn().mockResolvedValue({ json: async () => ({ ok: false, description: 'Too Many Requests: retry after 1' }) });
       global.fetch = fetchMock as unknown as typeof fetch;
       const result = await registerTelegramCommands('token', sampleCommands, 2);
       expect(result.status).toBe('error');
-      expect(result.error).toBe('Bad Request');
+      expect(result.error).toBe('Too Many Requests: retry after 1');
       expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('does NOT retry a Bad Request rejection — the identical payload cannot succeed', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ json: async () => ({ ok: false, description: 'Bad Request: BOT_COMMANDS_TOO_MUCH' }) });
+      global.fetch = fetchMock as unknown as typeof fetch;
+      const result = await registerTelegramCommands('token', sampleCommands, 3);
+      expect(result.status).toBe('error');
+      expect(result.error).toBe('Bad Request: BOT_COMMANDS_TOO_MUCH');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // Telegram's setMyCommands enforces an undocumented budget on the aggregate
+  // payload beyond the documented 100-command cap: ~21 commands with full
+  // 256-char descriptions already fail with BOT_COMMANDS_TOO_MUCH. These cover
+  // the pre-send shrink that keeps large skill menus registrable.
+  describe('fitCommandsToTelegramBudget (BOT_COMMANDS_TOO_MUCH payload shrink)', () => {
+    it('passes small command lists through untouched', () => {
+      const cmds = [{ command: 'status', description: 'Show status' }];
+      const { commands, dropped } = fitCommandsToTelegramBudget(cmds);
+      expect(commands).toEqual(cmds);
+      expect(dropped).toBe(0);
+    });
+
+    it('truncates 256-char descriptions to fit the payload budget', () => {
+      const cmds = Array.from({ length: 41 }, (_, i) => ({
+        command: `cmd_${i}`,
+        description: 'x'.repeat(256),
+      }));
+      const { commands, dropped } = fitCommandsToTelegramBudget(cmds);
+      expect(dropped).toBe(0);
+      expect(commands).toHaveLength(41);
+      for (const c of commands) {
+        expect(c.description.length).toBeLessThanOrEqual(80);
+      }
+      const total = commands.reduce((s, c) => s + c.command.length + c.description.length, 0);
+      expect(total).toBeLessThanOrEqual(4000);
+    });
+
+    it('drops trailing commands when even truncated descriptions exceed the budget', () => {
+      const cmds = Array.from({ length: 100 }, (_, i) => ({
+        command: `command_number_${i}`,
+        description: 'y'.repeat(80),
+      }));
+      const { commands, dropped } = fitCommandsToTelegramBudget(cmds);
+      expect(dropped).toBeGreaterThan(0);
+      expect(commands.length + dropped).toBe(100);
+      const total = commands.reduce((s, c) => s + c.command.length + c.description.length, 0);
+      expect(total).toBeLessThanOrEqual(4000);
+    });
+
+    it('caps the list at 100 commands and counts the excess as dropped', () => {
+      const cmds = Array.from({ length: 120 }, (_, i) => ({
+        command: `c${i}`,
+        description: 'd',
+      }));
+      const { commands, dropped } = fitCommandsToTelegramBudget(cmds);
+      expect(commands).toHaveLength(100);
+      expect(dropped).toBe(20);
+    });
+
+    it('registerTelegramCommands sends the shrunk payload and reports dropped', async () => {
+      const cmds = Array.from({ length: 41 }, (_, i) => ({
+        command: `cmd_${i}`,
+        description: 'z'.repeat(256),
+      }));
+      let sentBody: any;
+      const fetchMock = vi.fn().mockImplementation(async (_url, init: any) => {
+        sentBody = JSON.parse(init.body);
+        return { json: async () => ({ ok: true }) };
+      });
+      global.fetch = fetchMock as unknown as typeof fetch;
+      const result = await registerTelegramCommands('token', cmds);
+      expect(result.status).toBe('ok');
+      expect(result.dropped).toBe(0);
+      expect(sentBody.commands).toHaveLength(41);
+      for (const c of sentBody.commands) {
+        expect(c.description.length).toBeLessThanOrEqual(80);
+      }
+    });
+
+    const originalFetch = global.fetch;
+    afterEach(() => {
+      global.fetch = originalFetch;
     });
   });
 });

@@ -70,6 +70,8 @@ export interface RegisterCommandsResult {
   count: number;
   commands: { command: string; description: string }[];
   error?: string;
+  /** Number of commands dropped to fit Telegram's payload budget (0 when all fit). */
+  dropped?: number;
 }
 
 // --- collectMetrics ---
@@ -515,6 +517,8 @@ export async function registerTelegramCommands(
     return { status: 'empty', count: 0, commands: [], error: 'No commands found to register' };
   }
 
+  const { commands: payload, dropped } = fitCommandsToTelegramBudget(commands);
+
   const totalAttempts = Math.max(1, attempts);
   let lastError = 'Failed to register commands with Telegram';
 
@@ -526,14 +530,17 @@ export async function registerTelegramCommands(
       const response = await fetch(`https://api.telegram.org/bot${botToken}/setMyCommands`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ commands, scope: { type: 'all_private_chats' } }),
+        body: JSON.stringify({ commands: payload, scope: { type: 'all_private_chats' } }),
       });
 
       const data = await response.json() as { ok: boolean; description?: string };
       if (data.ok) {
-        return { status: 'ok', count: commands.length, commands };
+        return { status: 'ok', count: payload.length, commands: payload, dropped };
       }
       lastError = data.description || 'Failed to register commands with Telegram';
+      // 4xx logical rejections (e.g. BOT_COMMANDS_TOO_MUCH) are deterministic —
+      // resending the identical payload cannot succeed, so don't burn retries.
+      if (lastError.startsWith('Bad Request')) break;
     } catch (err) {
       lastError = String(err);
     }
@@ -544,7 +551,46 @@ export async function registerTelegramCommands(
     }
   }
 
-  return { status: 'error', count: 0, commands, error: lastError };
+  return { status: 'error', count: 0, commands: payload, error: lastError, dropped };
+}
+
+// setMyCommands enforces the documented caps (100 commands, 256-char
+// descriptions) but ALSO an undocumented budget on the aggregate payload:
+// empirically (7/23/26, bot api 9.x) ~21 commands with full 256-char
+// descriptions already fail with BOT_COMMANDS_TOO_MUCH, while the same 41
+// commands with 80-char descriptions register fine. Keep descriptions short
+// and cap the summed command+description length well under the observed
+// failure threshold (~5k chars).
+const TELEGRAM_MAX_COMMANDS = 100;
+const TELEGRAM_DESC_MAX = 80;
+const TELEGRAM_PAYLOAD_CHAR_BUDGET = 4000;
+
+/**
+ * Shrink a command list until Telegram will accept it: truncate descriptions,
+ * then drop trailing commands to stay inside the aggregate character budget.
+ * Returns the number of commands dropped so callers can log the truncation
+ * instead of silently registering a partial menu.
+ */
+export function fitCommandsToTelegramBudget(
+  commands: { command: string; description: string }[],
+): { commands: { command: string; description: string }[]; dropped: number } {
+  const trimmed = commands.slice(0, TELEGRAM_MAX_COMMANDS).map((c) => ({
+    command: c.command,
+    description: c.description.length > TELEGRAM_DESC_MAX
+      ? c.description.slice(0, TELEGRAM_DESC_MAX - 1) + '…'
+      : c.description,
+  }));
+
+  const fitted: { command: string; description: string }[] = [];
+  let used = 0;
+  for (const c of trimmed) {
+    const cost = c.command.length + c.description.length;
+    if (used + cost > TELEGRAM_PAYLOAD_CHAR_BUDGET) break;
+    used += cost;
+    fitted.push(c);
+  }
+
+  return { commands: fitted, dropped: commands.length - fitted.length };
 }
 
 // --- Internal helpers ---
